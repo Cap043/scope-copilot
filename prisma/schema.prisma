@@ -1,0 +1,84 @@
+// Scope Copilot's core database models.
+//
+// Organization = an agency/workspace.
+// User         = someone who belongs to an organization.
+// Client       = a client belonging to an organization.
+// Project      = a project belonging to both an organization and a client.
+//
+// We intentionally keep the first schema small.
+// Scope, requests, decisions, change orders, etc. will be added
+// when we implement those product features.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+
+  users     User[]
+  clients   Client[]
+  projects  Project[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  name           String?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+}
+
+model Client {
+  id             String       @id @default(cuid())
+  name           String
+  email          String?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  projects       Project[]
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+}
+
+model Project {
+  id             String       @id @default(cuid())
+  name           String
+  value          Decimal      @db.Decimal(12, 2)
+
+  // Dates are optional because, as we discussed,
+  // the user may not know the timeline when creating a project.
+  startDate      DateTime?
+  targetEndDate  DateTime?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  clientId       String
+  client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([clientId])
+}
