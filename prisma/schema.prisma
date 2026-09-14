@@ -204,10 +204,63 @@ model Project {
 
   clientId String
   client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
+scopeBaselines ScopeBaseline[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([organizationId])
   @@index([clientId])
+}
+// -----------------------------------------------------------------------------
+// Scope Copilot: Scope Baseline
+//
+// A ScopeBaseline is the structured representation of a project's agreed scope.
+// Multiple versions can exist over the lifetime of a project.
+//
+// The original/normalized source text is retained alongside the AI-extracted
+// structure so future decisions can always be grounded in the source material.
+// -----------------------------------------------------------------------------
+
+model ScopeBaseline {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Baseline versions start at 1 and increase whenever the scope is formally
+  // revised. The database constraint prevents duplicate versions per project.
+  version Int @default(1)
+
+  // DRAFT     = extracted/edited but not yet approved
+  // APPROVED  = the active agreed scope
+  // ARCHIVED  = an older approved version
+  status String @default("DRAFT")
+
+  // How the scope entered the system.
+  // V1: PASTE, PDF, DOCX, TXT
+  sourceType String
+
+  // Normalized source content retained for traceability and AI grounding.
+  sourceText String @db.Text
+
+  // Structured scope extracted from the source.
+  //
+  // Expected shape:
+  // {
+  //   deliverables: [],
+  //   features: [],
+  //   exclusions: [],
+  //   revisionLimits: [],
+  //   timeline: {},
+  //   assumptions: []
+  // }
+  structuredScope Json
+
+  approvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, version])
+  @@index([projectId])
 }
