@@ -1,17 +1,16 @@
 import { prisma } from "@/lib/db";
+import { getCurrentOrganizationId } from "@/lib/auth-session";
 
-// The database is now the single source of truth for projects.
-// This replaces the temporary in-memory array we used while
-// building the initial UI workflow.
+// The authenticated session determines which organization owns the data.
+// The browser never gets to choose an organization ID.
 
 export async function getProjects() {
-  // Fetch projects belonging to the current organization.
-  // Authentication will provide the organization ID later.
-  //
-  // For now, we use a temporary development organization ID.
-  // We'll replace this with the authenticated user's organization
-  // once Better Auth is connected.
+  const organizationId = await getCurrentOrganizationId();
+
   return prisma.project.findMany({
+    where: {
+      organizationId,
+    },
     orderBy: {
       createdAt: "desc",
     },
@@ -22,11 +21,14 @@ export async function getProjects() {
 }
 
 export async function getProject(id: string) {
-  // Fetch one project together with its client.
-  // This powers the project detail page.
-  return prisma.project.findUnique({
+  const organizationId = await getCurrentOrganizationId();
+
+  // The organization condition prevents a user from accessing
+  // another organization's project even if they know its ID.
+  return prisma.project.findFirst({
     where: {
       id,
+      organizationId,
     },
     include: {
       client: true,
@@ -41,37 +43,17 @@ export async function createProject(data: {
   startDate?: string;
   endDate?: string;
 }) {
-  // Until authentication exists, we need an organization and client
-  // to satisfy the database relationships.
-  //
-  // This temporary development organization will be replaced by
-  // the authenticated user's real organization.
-  const organization = await prisma.organization.upsert({
-    where: {
-      id: "development-org",
-    },
-    update: {},
-   create: {
-  id: "development-org",
-  name: "Development Agency",
-  slug: "development-agency",
-  createdAt: new Date(),
-  updatedAt: new Date(),
-},
-  });
+  const organizationId = await getCurrentOrganizationId();
 
-  // Reuse an existing client with the same name inside this organization,
-  // or create the client if this is the first project for them.
+  // Clients belong to the authenticated organization.
   const client = await prisma.client.create({
     data: {
       name: data.client,
-      organizationId: organization.id,
+      organizationId,
     },
   });
 
-  // Create the actual project in PostgreSQL.
-  // Unlike our previous in-memory store, this survives refreshes
-  // and server restarts.
+  // Create the project inside the authenticated organization.
   return prisma.project.create({
     data: {
       name: data.name,
@@ -82,7 +64,7 @@ export async function createProject(data: {
       targetEndDate: data.endDate
         ? new Date(data.endDate)
         : undefined,
-      organizationId: organization.id,
+      organizationId,
       clientId: client.id,
     },
     include: {

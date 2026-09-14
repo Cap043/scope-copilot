@@ -20,30 +20,68 @@ export default function SignUpPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault();
 
-    setError("");
-    setLoading(true);
+  setError("");
+  setLoading(true);
 
-    const { error } = await authClient.signUp.email({
-      name,
-      email,
-      password,
-    });
+  // Create the user account and authenticated session.
+  const { error } = await authClient.signUp.email({
+    name,
+    email,
+    password,
+  });
 
+  if (error) {
     setLoading(false);
-
-    if (error) {
-      setError(error.message || "Unable to create your account.");
-      return;
-    }
-
-    // Better Auth creates the authenticated session after signup
-    // when autoSignIn is enabled (the default).
-    router.push("/dashboard");
+    setError(error.message || "Unable to create your account.");
+    return;
   }
 
+  // Create the user's first workspace.
+  // Better Auth automatically makes the new user its owner.
+  const slugBase = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  const slug = `${slugBase || "workspace"}-${Date.now()}`;
+
+  const { data: organization, error: organizationError } =
+    await authClient.organization.create({
+      name: `${name}'s Workspace`,
+      slug,
+    });
+
+  if (organizationError || !organization) {
+    setLoading(false);
+    setError(
+      organizationError?.message ||
+        "Account created, but we couldn't create your workspace.",
+    );
+    return;
+  }
+
+  // Explicitly make the new workspace the active organization.
+  const { error: activeOrganizationError } =
+    await authClient.organization.setActive({
+      organizationId: organization.id,
+    });
+
+  setLoading(false);
+
+  if (activeOrganizationError) {
+    setError(
+      activeOrganizationError.message ||
+        "Workspace created, but we couldn't activate it.",
+    );
+    return;
+  }
+
+  router.push("/dashboard");
+}
   return (
     <div className="flex min-h-screen items-center justify-center p-6">
       <Card className="w-full max-w-md">
