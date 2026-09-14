@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { getProject } from "@/lib/projects";
 import { Button } from "@/components/ui/button";
+import { ScopeInput } from "@/components/projects/scope/scope-input";
 import {
   Card,
   CardContent,
@@ -120,26 +121,39 @@ export default async function ProjectPage({
           </Card>
         </div>
 
-        <Card className="mt-8">
-          <CardHeader>
-            <CardTitle>Scope</CardTitle>
-          </CardHeader>
+        {project.scopeBaselines.length === 0 ? (
+  <ScopeInput projectId={project.id} />
+) : (
+  <Card className="mt-8">
+    <CardHeader>
+      <CardTitle>Scope</CardTitle>
+    </CardHeader>
 
-          <CardContent>
-            <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed text-center">
-              <div>
-                <h2 className="font-medium">
-                  No scope added yet
-                </h2>
+    <CardContent>
+      <div className="rounded-lg border p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="font-medium">
+              Scope baseline v{project.scopeBaselines[0].version}
+            </p>
 
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Upload or paste the project SOW to establish the scope
-                  baseline.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Draft
+            </p>
+          </div>
+
+          <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
+            DRAFT
+          </span>
+        </div>
+
+        <p className="mt-4 line-clamp-4 whitespace-pre-wrap text-sm text-muted-foreground">
+          {project.scopeBaselines[0].sourceText}
+        </p>
+      </div>
+    </CardContent>
+  </Card>
+)}
       </div>
     </div>
   );

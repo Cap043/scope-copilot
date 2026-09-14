@@ -30,9 +30,15 @@ export async function getProject(id: string) {
       id,
       organizationId,
     },
-    include: {
-      client: true,
+  include: {
+  client: true,
+  scopeBaselines: {
+    orderBy: {
+      version: "desc",
     },
+    take: 1,
+  },
+},
   });
 }
 
