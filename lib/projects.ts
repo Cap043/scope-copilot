@@ -51,10 +51,13 @@ export async function createProject(data: {
       id: "development-org",
     },
     update: {},
-    create: {
-      id: "development-org",
-      name: "Development Agency",
-    },
+   create: {
+  id: "development-org",
+  name: "Development Agency",
+  slug: "development-agency",
+  createdAt: new Date(),
+  updatedAt: new Date(),
+},
   });
 
   // Reuse an existing client with the same name inside this organization,
