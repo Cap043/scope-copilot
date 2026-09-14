@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
+import { getPendingInvitation } from "@/lib/organization-access";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 
@@ -10,15 +11,27 @@ export default async function DashboardLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Check the actual Better Auth session on the server.
-  // This protects every route inside the dashboard route group.
   const session = await auth.api.getSession({
     headers: await headers(),
   });
 
-  // Users without a valid session cannot access the application workspace.
   if (!session) {
     redirect("/login");
+  }
+
+  const activeOrganizationId =
+    session.session.activeOrganizationId;
+
+  if (!activeOrganizationId) {
+    const invitation = await getPendingInvitation(
+      session.user.email,
+    );
+
+    if (invitation) {
+      redirect(`/invitation/${invitation.id}`);
+    }
+
+    redirect("/onboarding");
   }
 
   return (

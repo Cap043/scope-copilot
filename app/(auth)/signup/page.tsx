@@ -20,73 +20,39 @@ export default function SignUpPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-  event.preventDefault();
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
 
-  setError("");
-  setLoading(true);
+    setError("");
+    setLoading(true);
 
-  // Create the user account and authenticated session.
-  const { error } = await authClient.signUp.email({
-    name,
-    email,
-    password,
-  });
-
-  if (error) {
-    setLoading(false);
-    setError(error.message || "Unable to create your account.");
-    return;
-  }
-
-  // Create the user's first workspace.
-  // Better Auth automatically makes the new user its owner.
-  const slugBase = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-
-  const slug = `${slugBase || "workspace"}-${Date.now()}`;
-
-  const { data: organization, error: organizationError } =
-    await authClient.organization.create({
-      name: `${name}'s Workspace`,
-      slug,
+    // Create the user account and authenticated session.
+    // Workspace creation happens during the onboarding step.
+    const { error } = await authClient.signUp.email({
+      name,
+      email,
+      password,
     });
 
-  if (organizationError || !organization) {
+    if (error) {
+      setLoading(false);
+      setError(error.message || "Unable to create your account.");
+      return;
+    }
+
     setLoading(false);
-    setError(
-      organizationError?.message ||
-        "Account created, but we couldn't create your workspace.",
-    );
-    return;
+
+    // The account is authenticated, but the user still needs
+    // to create their agency workspace before entering the dashboard.
+    router.push("/onboarding");
   }
 
-  // Explicitly make the new workspace the active organization.
-  const { error: activeOrganizationError } =
-    await authClient.organization.setActive({
-      organizationId: organization.id,
-    });
-
-  setLoading(false);
-
-  if (activeOrganizationError) {
-    setError(
-      activeOrganizationError.message ||
-        "Workspace created, but we couldn't activate it.",
-    );
-    return;
-  }
-
-  router.push("/dashboard");
-}
   return (
     <div className="flex min-h-screen items-center justify-center p-6">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Create your account</CardTitle>
+
           <p className="text-sm text-muted-foreground">
             Start managing your project scope.
           </p>
@@ -96,6 +62,7 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="name">Name</Label>
+
               <Input
                 id="name"
                 value={name}
@@ -107,6 +74,7 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
 
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
+
               <Input
                 id="email"
                 type="email"
@@ -119,6 +87,7 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
 
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
+
               <Input
                 id="password"
                 type="password"
@@ -159,3 +128,4 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     </div>
   );
 }
+ 
