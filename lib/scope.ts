@@ -54,14 +54,15 @@ export async function createScopeBaseline(data: {
 
       // AI extraction will populate this later.
       // For now the baseline contains an intentionally empty structure.
-      structuredScope: {
-        deliverables: [],
-        features: [],
-        exclusions: [],
-        revisionLimits: [],
-        timeline: {},
-        assumptions: [],
-      },
+    structuredScope: {
+  deliverables: [],
+  features: [],
+  exclusions: [],
+  clientResponsibilities: [],
+  revisionLimits: [],
+  timeline: {},
+  assumptions: [],
+},
     },
   });
 }
