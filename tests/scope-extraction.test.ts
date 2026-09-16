@@ -1,3 +1,4 @@
+
 import { describe, expect, it, vi } from "vitest";
 
 const { generateStructuredOutput } = vi.hoisted(() => ({
@@ -11,6 +12,12 @@ vi.mock("@/lib/ai/gemini", () => ({
 }));
 
 import { extractScope } from "@/lib/ai/scope/extract";
+
+const sourceText = `
+The agency will build a responsive website.
+The website will include a contact form.
+The project will be completed within 5 weeks after kickoff.
+`;
 
 const validScope = {
   deliverables: [
@@ -66,9 +73,7 @@ describe("extractScope", () => {
   it("returns a validated normalized scope", async () => {
     generateStructuredOutput.mockResolvedValueOnce(validScope);
 
-    const result = await extractScope(
-      "The agency will build a responsive website.",
-    );
+    const result = await extractScope(sourceText);
 
     expect(result).toEqual(validScope);
     expect(generateStructuredOutput).toHaveBeenCalledOnce();
@@ -77,20 +82,25 @@ describe("extractScope", () => {
   it("passes the SOW, system instruction, and Gemini schema to the provider", async () => {
     generateStructuredOutput.mockResolvedValueOnce(validScope);
 
-    const sourceText =
-      "The agency will build a responsive website.";
-
     await extractScope(sourceText);
 
     const call = generateStructuredOutput.mock.calls[0][0];
 
     expect(call.userContent).toContain(sourceText);
     expect(call.systemInstruction).toContain(
-      "strict SOW Extraction Engine",
-    );
-    expect(call.systemInstruction).toContain(
-      "EXACT SOURCE EVIDENCE",
-    );
+  "Scope Copilot SOW Extraction Engine",
+);
+
+expect(call.systemInstruction).toContain(
+  "ABSOLUTE ATOMICITY",
+);
+
+expect(call.systemInstruction).toContain(
+  "MUTUALLY EXCLUSIVE CATEGORIES",
+);
+   expect(call.systemInstruction).toContain(
+  "SOURCE EVIDENCE — ABSOLUTE REQUIREMENT",
+);
     expect(call.systemInstruction).toContain(
       "ZERO HALLUCINATION",
     );
