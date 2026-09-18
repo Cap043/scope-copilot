@@ -45,8 +45,8 @@ export function createGeminiProvider(
       const geminiClient = client ?? createGeminiClient();
 
       const response = await geminiClient.models.generateContent({
-        // model: "gemini-3.8-flash",
-        model: "gemini-flash-latest",
+        model: process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest",
+        // model: "gemini-flash-latest",
         contents: userContent,
         config: {
           systemInstruction,

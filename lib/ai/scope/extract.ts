@@ -1,9 +1,10 @@
 import { geminiProvider } from "@/lib/ai/gemini";
-import { resolveSourceQuote } from "@/lib/scope-evidence";
 import { normalizedScopeGeminiSchema } from "@/lib/ai/gemini-schema";
+import { resolveSourceQuote } from "@/lib/scope-evidence";
 import {
-  normalizedScopeSchema,
-  validateScopeSourceReferences,
+  extractedScopeSchema,
+  validateExtractedScopeSourceReferences,
+  type ExtractedScope,
 } from "@/lib/scope-schema";
 
 import type { NormalizedScope } from "@/lib/scope-schema";
@@ -477,7 +478,7 @@ Do not include commentary outside the JSON structure.
 
 export async function extractScope(
   sourceText: string,
-): Promise<NormalizedScope> {
+): Promise<ExtractedScope> {
   const trimmedText = sourceText.trim();
 
   if (!trimmedText) {
@@ -498,7 +499,7 @@ ${trimmedText}
   });
 
    // Treat Gemini output as untrusted until it passes our application schema.
-  const parsed = normalizedScopeSchema.safeParse(result);
+const parsed = extractedScopeSchema.safeParse(result);
 
   if (!parsed.success) {
     throw new Error("Gemini returned an invalid scope structure.");
@@ -551,7 +552,12 @@ ${trimmedText}
   ]);
 
   // Final integrity check: every resolved quote must exist verbatim.
-  if (!validateScopeSourceReferences(scope, trimmedText)) {
+  if (
+  !validateExtractedScopeSourceReferences(
+    scope,
+    trimmedText,
+  )
+) {
     console.dir(scope, { depth: null });
     throw new Error("Gemini returned invalid source references.");
   }

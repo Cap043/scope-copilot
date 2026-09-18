@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+
 import { getProject } from "@/lib/projects";
 import { Button } from "@/components/ui/button";
 import { ScopeInput } from "@/components/projects/scope/scope-input";
+import { ScopeReview } from "@/components/projects/scope/scope-review";
+import type { NormalizedScope } from "@/lib/scope-schema";
 import {
   Card,
   CardContent,
@@ -47,6 +50,8 @@ export default async function ProjectPage({
       </div>
     );
   }
+
+  const baseline = project.scopeBaselines[0];
 
   return (
     <div className="p-6 lg:p-8">
@@ -121,39 +126,50 @@ export default async function ProjectPage({
           </Card>
         </div>
 
-        {project.scopeBaselines.length === 0 ? (
-  <ScopeInput projectId={project.id} />
-) : (
-  <Card className="mt-8">
-    <CardHeader>
-      <CardTitle>Scope</CardTitle>
-    </CardHeader>
+        {baseline ? (
+          <Card className="mt-8">
+            <CardHeader>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <CardTitle>Scope</CardTitle>
 
-    <CardContent>
-      <div className="rounded-lg border p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="font-medium">
-              Scope baseline v{project.scopeBaselines[0].version}
-            </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Scope baseline v{baseline.version}
+                  </p>
+                </div>
 
-            <p className="mt-1 text-sm text-muted-foreground">
-              Draft
-            </p>
-          </div>
+                <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
+                  {baseline.status}
+                </span>
+              </div>
+            </CardHeader>
 
-          <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
-            DRAFT
-          </span>
-        </div>
+            <CardContent>
+              <div className="rounded-lg border p-4">
+                <p className="text-sm font-medium">
+                  Original scope
+                </p>
 
-        <p className="mt-4 line-clamp-4 whitespace-pre-wrap text-sm text-muted-foreground">
-          {project.scopeBaselines[0].sourceText}
-        </p>
-      </div>
-    </CardContent>
-  </Card>
-)}
+                <div className="mt-4 max-h-64 overflow-y-auto rounded-md border bg-muted/30 p-4">
+                  <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+                    {baseline.sourceText}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-8">
+               <ScopeReview
+  baselineId={baseline.id}
+  status={baseline.status}
+  projectId={project.id}
+  scope={baseline.structuredScope as NormalizedScope}
+/>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <ScopeInput projectId={project.id} />
+        )}
       </div>
     </div>
   );
