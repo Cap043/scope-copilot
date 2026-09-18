@@ -158,7 +158,8 @@ export default async function ProjectPage({
               </div>
 
               <div className="mt-8">
-               <ScopeReview
+             <ScopeReview
+  key={baseline.id}
   baselineId={baseline.id}
   status={baseline.status}
   projectId={project.id}
