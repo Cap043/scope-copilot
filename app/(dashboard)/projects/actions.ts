@@ -9,7 +9,7 @@ export async function createProjectAction(data: {
   startDate?: string;
   endDate?: string;
 }) {
-  // createProject derives the organization from the authenticated
+  // createProject derives the Xorganization from the authenticated
   // session, so the browser cannot choose where the project is stored.
   const project = await createProject(data);
 
