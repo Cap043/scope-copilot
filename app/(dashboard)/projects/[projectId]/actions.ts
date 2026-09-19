@@ -1,5 +1,7 @@
 "use server";
-
+import {
+  createScopeRevisionCandidate,
+} from "@/lib/scope-revision";
 import {
   addManualScopeItem,
   amendScopeItem,
@@ -128,5 +130,31 @@ export async function amendScopeTimelineAction(
   return {
     baselineId: result.baseline.id,
     version: result.baseline.version,
+  };
+}
+export async function createScopeRevisionCandidateAction(
+  data: {
+    projectId: string;
+    sourceText: string;
+    sourceType?: string;
+  },
+) {
+  const candidate =
+    await createScopeRevisionCandidate(
+      data,
+    );
+
+  return {
+    id: candidate.id,
+    projectId:
+      candidate.projectId,
+    baseBaselineId:
+      candidate.baseBaselineId,
+    baseVersion:
+      candidate.baseVersion,
+    status:
+      candidate.status,
+    sourceType:
+      candidate.sourceType,
   };
 }

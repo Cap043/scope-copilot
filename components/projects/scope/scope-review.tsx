@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Plus } from "lucide-react";
-
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 import { AddAssumptionForm } from "./add-assumption-form";
@@ -81,17 +81,33 @@ export function ScopeReview(props: ScopeReviewProps) {
             </p>
           </div>
 
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleCreateVersion}
-            disabled={creatingVersion}
-          >
-            <Plus />
-            {creatingVersion
-              ? "Creating version..."
-              : "Create new scope version"}
-          </Button>
+          <div className="flex shrink-0 gap-2">
+  <Button
+    type="button"
+    variant="outline"
+    nativeButton={false}
+    render={
+      <Link
+        href={`/projects/${props.projectId}/scope/update`}
+      />
+    }
+  >
+    <Plus />
+    Update from new SOW
+  </Button>
+
+  <Button
+    type="button"
+    variant="outline"
+    onClick={handleCreateVersion}
+    disabled={creatingVersion}
+  >
+    <Plus />
+    {creatingVersion
+      ? "Creating version..."
+      : "Create new scope version"}
+  </Button>
+</div>
         </div>
       )}
 

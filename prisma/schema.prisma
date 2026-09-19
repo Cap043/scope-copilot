@@ -204,7 +204,8 @@ model Project {
 
   clientId String
   client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-scopeBaselines ScopeBaseline[]
+  scopeBaselines         ScopeBaseline[]
+  scopeRevisionCandidates ScopeRevisionCandidate[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -226,7 +227,7 @@ model ScopeBaseline {
 
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
+  revisionCandidates ScopeRevisionCandidate[] @relation("ScopeBaselineRevisionCandidates")
   // Baseline versions start at 1 and increase whenever the scope is formally
   // revised. The database constraint prevents duplicate versions per project.
   version Int @default(1)
@@ -263,4 +264,58 @@ model ScopeBaseline {
 
   @@unique([projectId, version])
   @@index([projectId])
+}
+// -----------------------------------------------------------------------------
+// Scope Copilot: Scope Revision Candidate
+//
+// A revision candidate represents a newly supplied SOW that has been extracted
+// by AI but has NOT yet become an authoritative scope version.
+//
+// This is deliberately separate from ScopeBaseline:
+// AI output must pass through human reconciliation before V2/V3 is created.
+// -----------------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Scope Revision Candidate
+//
+// A revision candidate represents a newly supplied SOW that has been extracted
+// by AI but has NOT yet become an authoritative scope version.
+//
+// This is deliberately separate from ScopeBaseline:
+// AI output must pass through human reconciliation before V2/V3 is created.
+// -----------------------------------------------------------------------------
+
+model ScopeRevisionCandidate {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // The approved baseline this candidate is intended to replace/update.
+  baseBaselineId String
+  baseBaseline ScopeBaseline @relation("ScopeBaselineRevisionCandidates", fields: [baseBaselineId], references: [id], onDelete: Cascade)
+
+  // PENDING_REVIEW = extracted and waiting for reconciliation.
+  // RECONCILED    = later completed by the reconciliation workflow.
+  // DISCARDED     = later explicitly abandoned.
+  status String @default("PENDING_REVIEW")
+
+  // How the revised SOW entered the system.
+  // 9A currently supports PASTE.
+  sourceType String
+
+  // The new SOW itself, retained as immutable candidate evidence.
+  sourceText String @db.Text
+
+  // IMPORTANT:
+  // This stores ExtractedScope, not NormalizedScope.
+  // IDs/provenance belong to the reconciliation/materialization stage.
+  extractedScope Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([baseBaselineId])
+  @@index([status])
 }
