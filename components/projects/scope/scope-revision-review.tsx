@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+
 import {
   AlertTriangle,
   Check,
@@ -11,11 +12,20 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-import { finalizeScopeRevisionAction } from "@/app/(dashboard)/projects/[projectId]/scope/update/actions";
+import {
+  finalizeScopeRevisionAction,
+  saveScopeRevisionDecisionAction,
+} from "@/app/(dashboard)/projects/[projectId]/scope/update/actions";
+
 import { Button } from "@/components/ui/button";
 
-import type { ScopeRevisionReview } from "@/lib/scope-revision-review";
-import type { ReconciliationUnresolvedEntry } from "@/lib/scope-reconciliation";
+import type {
+  ScopeRevisionReview,
+} from "@/lib/scope-revision-review";
+
+import type {
+  RevisionReviewDecision,
+} from "@/lib/scope-revision-review-state";
 
 type Props = {
   review: ScopeRevisionReview;
@@ -29,13 +39,15 @@ type RevisionDiffEntry =
   | ScopeRevisionReview["diff"]["revisionLimits"][number]
   | ScopeRevisionReview["diff"]["assumptions"][number];
 
-type Decision = "CARRY_OVER" | "REMOVE";
+type Decision =
+  RevisionReviewDecision;
 
 const SECTION_LABELS = {
   deliverables: "Deliverables",
   features: "Features",
   exclusions: "Exclusions",
-  clientResponsibilities: "Client Responsibilities",
+  clientResponsibilities:
+    "Client Responsibilities",
   revisionLimits: "Revision Limits",
   assumptions: "Assumptions",
 } as const;
@@ -48,7 +60,9 @@ const SECTION_LABELS = {
  * - revision limits -> type + limit
  * - assumptions -> statement
  */
-function itemLabel(item: unknown) {
+function itemLabel(
+  item: unknown,
+) {
   if (
     typeof item !== "object" ||
     item === null
@@ -59,25 +73,35 @@ function itemLabel(item: unknown) {
   const record =
     item as Record<string, unknown>;
 
-  if (typeof record.title === "string") {
+  if (
+    typeof record.title ===
+    "string"
+  ) {
     return record.title;
   }
 
   if (
-    typeof record.type === "string" &&
-    typeof record.limit === "string"
+    typeof record.type ===
+      "string" &&
+    typeof record.limit ===
+      "string"
   ) {
     return `${record.type}: ${record.limit}`;
   }
 
-  if (typeof record.statement === "string") {
+  if (
+    typeof record.statement ===
+    "string"
+  ) {
     return record.statement;
   }
 
   return "Scope item";
 }
 
-function statusClasses(status: string) {
+function statusClasses(
+  status: string,
+) {
   switch (status) {
     case "CONFLICT":
       return "bg-destructive/10 text-destructive";
@@ -95,17 +119,23 @@ function statusClasses(status: string) {
 /**
  * One changed scope entry.
  *
- * Missing manual amendments expose an explicit carry-over/remove decision.
+ * Missing manual amendments expose an explicit
+ * carry-over/remove decision.
+ *
  * Reappeared removed items remain blocked as conflicts.
  */
 function ChangeCard({
   entry,
   decision,
+  saving,
   onDecision,
 }: {
   entry: RevisionDiffEntry;
   decision?: Decision;
-  onDecision?: (decision: Decision) => void;
+  saving: boolean;
+  onDecision?: (
+    decision: Decision,
+  ) => Promise<void>;
 }) {
   const isManualMissing =
     entry.status === "MISSING" &&
@@ -139,21 +169,26 @@ function ChangeCard({
             {entry.baseItem && (
               <p className="text-sm font-medium">
                 Previous:{" "}
-                {itemLabel(entry.baseItem)}
+                {itemLabel(
+                  entry.baseItem,
+                )}
               </p>
             )}
 
             {entry.candidateItem && (
               <p className="text-sm text-muted-foreground">
                 Proposed:{" "}
-                {itemLabel(entry.candidateItem)}
+                {itemLabel(
+                  entry.candidateItem,
+                )}
               </p>
             )}
           </div>
         </div>
       </div>
 
-      {entry.status === "MODIFIED" &&
+      {entry.status ===
+        "MODIFIED" &&
         entry.baseItem &&
         entry.candidateItem && (
           <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -163,7 +198,9 @@ function ChangeCard({
               </p>
 
               <p className="mt-1 text-sm">
-                {itemLabel(entry.baseItem)}
+                {itemLabel(
+                  entry.baseItem,
+                )}
               </p>
             </div>
 
@@ -173,7 +210,9 @@ function ChangeCard({
               </p>
 
               <p className="mt-1 text-sm">
-                {itemLabel(entry.candidateItem)}
+                {itemLabel(
+                  entry.candidateItem,
+                )}
               </p>
             </div>
           </div>
@@ -192,17 +231,21 @@ function ChangeCard({
               the amendment in the new scope.
             </p>
 
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               <Button
                 type="button"
                 size="sm"
                 variant={
-                  decision === "CARRY_OVER"
+                  decision ===
+                  "CARRY_OVER"
                     ? "default"
                     : "outline"
                 }
+                disabled={saving}
                 onClick={() =>
-                  onDecision("CARRY_OVER")
+                  onDecision(
+                    "CARRY_OVER",
+                  )
                 }
               >
                 <Check />
@@ -213,17 +256,27 @@ function ChangeCard({
                 type="button"
                 size="sm"
                 variant={
-                  decision === "REMOVE"
+                  decision ===
+                  "REMOVE"
                     ? "default"
                     : "outline"
                 }
+                disabled={saving}
                 onClick={() =>
-                  onDecision("REMOVE")
+                  onDecision(
+                    "REMOVE",
+                  )
                 }
               >
                 <Minus />
                 Remove
               </Button>
+
+              {saving && (
+                <span className="text-xs text-muted-foreground">
+                  Saving...
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -257,14 +310,37 @@ export function ScopeRevisionReview({
 }: Props) {
   const router = useRouter();
 
-  const [decisions, setDecisions] =
-    useState<Record<string, Decision>>({});
+  /**
+   * Initialize from persisted database state.
+   *
+   * Refreshing the page therefore restores the exact
+   * current reviewer decisions.
+   */
+  const [
+    decisions,
+    setDecisions,
+  ] = useState<
+    Record<string, Decision>
+  >(
+    review.review.decisions,
+  );
 
-  const [finalizing, setFinalizing] =
-    useState(false);
+  const [
+    savingItemId,
+    setSavingItemId,
+  ] = useState<
+    string | null
+  >(null);
 
-  const [finalizeError, setFinalizeError] =
-    useState("");
+  const [
+    finalizing,
+    setFinalizing,
+  ] = useState(false);
+
+  const [
+    reviewError,
+    setReviewError,
+  ] = useState("");
 
   const allChanges = useMemo(() => {
     const sections = [
@@ -276,18 +352,22 @@ export function ScopeRevisionReview({
       "assumptions",
     ] as const;
 
-    return sections.flatMap((section) =>
-      review.diff[section].map((entry) => ({
-        section,
-        entry,
-      })),
+    return sections.flatMap(
+      (section) =>
+        review.diff[
+          section
+        ].map((entry) => ({
+          section,
+          entry,
+        })),
     );
   }, [review.diff]);
 
   const changedEntries =
     allChanges.filter(
       ({ entry }) =>
-        entry.status !== "UNCHANGED",
+        entry.status !==
+        "UNCHANGED",
     );
 
   /**
@@ -298,60 +378,124 @@ export function ScopeRevisionReview({
    * are allowed to disappear deterministically.
    */
   const unresolvedCount =
-    review.unresolved.filter((entry) => {
-      if (
-        entry.reason ===
-        "REMOVED_ITEM_REAPPEARED"
-      ) {
-        return true;
-      }
+    review.unresolved.filter(
+      (entry) => {
+        if (
+          entry.reason ===
+          "REMOVED_ITEM_REAPPEARED"
+        ) {
+          return true;
+        }
 
-      if (
-        entry.reason ===
-          "MISSING_ACTIVE_ITEM" &&
-        entry.entry.baseItem?.provenance.type ===
-          "manual_amendment"
-      ) {
-        const itemId =
-          entry.entry.baseItemId;
+        if (
+          entry.reason ===
+            "MISSING_ACTIVE_ITEM" &&
+          entry.entry.baseItem
+            ?.provenance.type ===
+            "manual_amendment"
+        ) {
+          const itemId =
+            entry.entry
+              .baseItemId;
 
-        return (
-          !itemId ||
-          !decisions[itemId]
-        );
-      }
+          return (
+            !itemId ||
+            !decisions[itemId]
+          );
+        }
 
-      return false;
-    }).length;
+        return false;
+      },
+    ).length;
 
+  /**
+   * Current decisions, not total historical decision rows.
+   */
   const selectedDecisionCount =
-    Object.keys(decisions).length;
+    Object.keys(decisions)
+      .length;
+
+  /**
+   * Persist a reviewer decision immediately.
+   *
+   * The local state is updated only after the server confirms
+   * the database write succeeded.
+   */
+  async function handleDecision(
+    itemId: string,
+    decision: Decision,
+  ) {
+    if (savingItemId) {
+      return;
+    }
+
+    setSavingItemId(
+      itemId,
+    );
+
+    setReviewError("");
+
+    try {
+      const result =
+        await saveScopeRevisionDecisionAction(
+          {
+            candidateId:
+              review.candidate
+                .id,
+
+            itemId,
+
+            decision,
+          },
+        );
+
+      setDecisions(
+        (previous) => ({
+          ...previous,
+          [itemId]:
+            result.decision,
+        }),
+      );
+    } catch (error) {
+      setReviewError(
+        error instanceof Error
+          ? error.message
+          : "We couldn't save that review decision.",
+      );
+    } finally {
+      setSavingItemId(null);
+    }
+  }
 
   async function handleFinalize() {
     if (
       unresolvedCount > 0 ||
-      finalizing
+      finalizing ||
+      savingItemId
     ) {
       return;
     }
 
     setFinalizing(true);
-    setFinalizeError("");
+    setReviewError("");
 
     try {
       const result =
-        await finalizeScopeRevisionAction({
-          candidateId:
-            review.candidate.id,
-          decisions,
-        });
+        await finalizeScopeRevisionAction(
+          {
+            candidateId:
+              review.candidate
+                .id,
+          },
+        );
 
       router.push(
         `/projects/${result.projectId}`,
       );
+
       router.refresh();
     } catch (error) {
-      setFinalizeError(
+      setReviewError(
         error instanceof Error
           ? error.message
           : "We couldn't create the new scope version.",
@@ -359,18 +503,6 @@ export function ScopeRevisionReview({
 
       setFinalizing(false);
     }
-  }
-
-  function handleDecision(
-    itemId: string,
-    decision: Decision,
-  ) {
-    setDecisions((previous) => ({
-      ...previous,
-      [itemId]: decision,
-    }));
-
-    setFinalizeError("");
   }
 
   return (
@@ -391,6 +523,10 @@ export function ScopeRevisionReview({
               Current approved scope: v
               {review.baseBaseline.version}
             </p>
+
+            <p className="mt-1 text-xs text-muted-foreground">
+              Decisions are saved automatically.
+            </p>
           </div>
 
           <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
@@ -404,7 +540,9 @@ export function ScopeRevisionReview({
               <FilePlus className="size-4" />
             }
             label="Changes"
-            value={changedEntries.length}
+            value={
+              changedEntries.length
+            }
           />
 
           <SummaryCard
@@ -412,7 +550,9 @@ export function ScopeRevisionReview({
               <AlertTriangle className="size-4" />
             }
             label="Unresolved"
-            value={unresolvedCount}
+            value={
+              unresolvedCount
+            }
           />
 
           <SummaryCard
@@ -420,13 +560,22 @@ export function ScopeRevisionReview({
               <Check className="size-4" />
             }
             label="Decisions"
-            value={selectedDecisionCount}
+            value={
+              selectedDecisionCount
+            }
           />
         </div>
+
+        {reviewError && (
+          <p className="mt-4 text-sm text-destructive">
+            {reviewError}
+          </p>
+        )}
       </div>
 
-      {/* Explain why manual decisions are required */}
-      {review.carryOverRequests.length > 0 && (
+      {/* Manual amendment explanation */}
+      {review.carryOverRequests.length >
+        0 && (
         <section>
           <h3 className="text-sm font-semibold">
             Manual amendments
@@ -450,69 +599,160 @@ export function ScopeRevisionReview({
           "revisionLimits",
           "assumptions",
         ] as const
-      ).map((section) => {
-        const entries =
-          review.diff[section].filter(
-            (entry) =>
-              entry.status !== "UNCHANGED",
-          );
+      ).map(
+        (section) => {
+          const entries =
+            review.diff[
+              section
+            ].filter(
+              (entry) =>
+                entry.status !==
+                "UNCHANGED",
+            );
 
-        if (entries.length === 0) {
-          return null;
-        }
+          if (
+            entries.length === 0
+          ) {
+            return null;
+          }
 
-        return (
-          <section key={section}>
-            <h3 className="text-sm font-semibold">
-              {SECTION_LABELS[section]}
-            </h3>
+          return (
+            <section
+              key={section}
+            >
+              <h3 className="text-sm font-semibold">
+                {SECTION_LABELS[
+                  section
+                ]}
+              </h3>
 
-            <div className="mt-3 space-y-3">
-              {entries.map(
-                (entry, index) => (
-                  <ChangeCard
-                    key={`${section}-${index}`}
-                    entry={entry}
-                    decision={
-                      entry.baseItemId
-                        ? decisions[
-                            entry.baseItemId
-                          ]
-                        : undefined
-                    }
-                    onDecision={
-                      entry.status ===
-                        "MISSING" &&
-                      entry.baseItem
-                        ?.provenance.type ===
-                        "manual_amendment" &&
-                      entry.baseItemId
-                        ? (decision) =>
-                            handleDecision(
-                              entry.baseItemId!,
+              <div className="mt-3 space-y-3">
+                {entries.map(
+                  (
+                    entry,
+                    index,
+                  ) => (
+                    <ChangeCard
+                      key={`${section}-${index}`}
+                      entry={entry}
+                      decision={
+                        entry.baseItemId
+                          ? decisions[
+                              entry
+                                .baseItemId
+                            ]
+                          : undefined
+                      }
+                      saving={
+                        Boolean(
+                          entry.baseItemId &&
+                          savingItemId ===
+                            entry.baseItemId,
+                        )
+                      }
+                      onDecision={
+                        entry.status ===
+                          "MISSING" &&
+                        entry.baseItem
+                          ?.provenance
+                          .type ===
+                          "manual_amendment" &&
+                        entry.baseItemId
+                          ? (
                               decision,
-                            )
-                        : undefined
-                    }
-                  />
-                ),
-              )}
-            </div>
-          </section>
-        );
-      })}
+                            ) =>
+                              handleDecision(
+                                entry.baseItemId!,
+                                decision,
+                              )
+                          : undefined
+                      }
+                    />
+                  ),
+                )}
+              </div>
+            </section>
+          );
+        },
+      )}
 
-      {changedEntries.length === 0 && (
+      {changedEntries.length ===
+        0 && (
         <div className="rounded-lg border p-6 text-sm text-muted-foreground">
           No scope changes were detected.
         </div>
+      )}
+
+      {/* Persisted review activity */}
+      {review.review
+        .history.length > 0 && (
+        <section>
+          <div>
+            <h3 className="text-sm font-semibold">
+              Review activity
+            </h3>
+
+            <p className="mt-1 text-sm text-muted-foreground">
+              Every reviewer decision is retained as
+              an immutable audit event.
+            </p>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {[
+              ...review.review
+                .history,
+            ]
+              .reverse()
+              .map(
+                (event) => (
+                  <div
+                    key={event.id}
+                    className="rounded-lg border p-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium">
+                          {event.actorName}
+                        </span>
+
+                        <span className="text-xs text-muted-foreground">
+                          {event.actorEmail}
+                        </span>
+                      </div>
+
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(
+                          event.createdAt,
+                        ).toLocaleString()}
+                      </span>
+                    </div>
+
+                    <p className="mt-2 text-sm">
+                      {event.decision ===
+                      "CARRY_OVER"
+                        ? "Carried over"
+                        : "Removed"}{" "}
+                      scope item
+                    </p>
+
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Item ID:{" "}
+                      {event.itemId}
+                    </p>
+                  </div>
+                ),
+              )}
+          </div>
+        </section>
       )}
 
       {/* Final reconciliation state and materialization action */}
       <div className="rounded-xl border bg-muted/20 p-5">
         <div className="flex items-start gap-3">
           <div className="mt-0.5">
-            {unresolvedCount === 0 ? (
+            {unresolvedCount ===
+            0 ? (
               <Check className="size-5" />
             ) : (
               <AlertTriangle className="size-5 text-muted-foreground" />
@@ -525,38 +765,44 @@ export function ScopeRevisionReview({
             </p>
 
             <p className="mt-1 text-sm text-muted-foreground">
-              {unresolvedCount === 0
+              {unresolvedCount ===
+              0
                 ? "All required reconciliation decisions are complete."
                 : `${unresolvedCount} change(s) still require explicit reconciliation.`}
             </p>
 
-            {unresolvedCount > 0 && (
+            {unresolvedCount >
+              0 && (
               <p className="mt-2 text-xs text-muted-foreground">
                 The new draft version cannot be created
                 until every blocking change is resolved.
               </p>
             )}
 
-            {finalizeError && (
-              <p className="mt-3 text-sm text-destructive">
-                {finalizeError}
-              </p>
-            )}
-
             <div className="mt-5 flex justify-end">
               <Button
                 type="button"
-                onClick={handleFinalize}
+                onClick={
+                  handleFinalize
+                }
                 disabled={
-                  unresolvedCount > 0 ||
-                  finalizing
+                  unresolvedCount >
+                    0 ||
+                  finalizing ||
+                  Boolean(
+                    savingItemId,
+                  )
                 }
               >
                 <Check />
+
                 {finalizing
                   ? "Creating draft version..."
                   : `Create version ${
-                      review.baseBaseline.version + 1
+                      review
+                        .baseBaseline
+                        .version +
+                      1
                     } draft`}
               </Button>
             </div>

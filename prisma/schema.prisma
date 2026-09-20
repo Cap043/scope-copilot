@@ -35,6 +35,9 @@ model User {
   accounts Account[]
   members  Member[]
 
+  revisionReviewDecisions  RevisionReviewDecision[]
+  finalizedRevisionReviews RevisionReview[] @relation("RevisionReviewFinalizedBy")
+
   @@map("user")
 }
 
@@ -117,8 +120,9 @@ model Organization {
   clients  Client[]
   projects Project[]
 
-createdAt DateTime @default(now())
-updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
   @@map("organization")
 }
 
@@ -204,14 +208,17 @@ model Project {
 
   clientId String
   client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  scopeBaselines         ScopeBaseline[]
+
+  scopeBaselines          ScopeBaseline[]
   scopeRevisionCandidates ScopeRevisionCandidate[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([organizationId])
   @@index([clientId])
 }
+
 // -----------------------------------------------------------------------------
 // Scope Copilot: Scope Baseline
 //
@@ -227,7 +234,9 @@ model ScopeBaseline {
 
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
   revisionCandidates ScopeRevisionCandidate[] @relation("ScopeBaselineRevisionCandidates")
+
   // Baseline versions start at 1 and increase whenever the scope is formally
   // revised. The database constraint prevents duplicate versions per project.
   version Int @default(1)
@@ -265,15 +274,6 @@ model ScopeBaseline {
   @@unique([projectId, version])
   @@index([projectId])
 }
-// -----------------------------------------------------------------------------
-// Scope Copilot: Scope Revision Candidate
-//
-// A revision candidate represents a newly supplied SOW that has been extracted
-// by AI but has NOT yet become an authoritative scope version.
-//
-// This is deliberately separate from ScopeBaseline:
-// AI output must pass through human reconciliation before V2/V3 is created.
-// -----------------------------------------------------------------------------
 
 // -----------------------------------------------------------------------------
 // Scope Copilot: Scope Revision Candidate
@@ -293,7 +293,7 @@ model ScopeRevisionCandidate {
 
   // The approved baseline this candidate is intended to replace/update.
   baseBaselineId String
-  baseBaseline ScopeBaseline @relation("ScopeBaselineRevisionCandidates", fields: [baseBaselineId], references: [id], onDelete: Cascade)
+  baseBaseline   ScopeBaseline @relation("ScopeBaselineRevisionCandidates", fields: [baseBaselineId], references: [id], onDelete: Cascade)
 
   // PENDING_REVIEW = extracted and waiting for reconciliation.
   // RECONCILED    = later completed by the reconciliation workflow.
@@ -312,10 +312,94 @@ model ScopeRevisionCandidate {
   // IDs/provenance belong to the reconciliation/materialization stage.
   extractedScope Json
 
+  // Durable reviewer state for this candidate.
+  // There can be only one review workspace per candidate.
+  review RevisionReview?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([projectId])
   @@index([baseBaselineId])
   @@index([status])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Revision Review
+//
+// One durable review workspace belongs to one scope revision candidate.
+//
+// The review itself represents the lifecycle of the reconciliation session.
+// Individual reviewer choices are stored separately in RevisionReviewDecision
+// so we retain an audit trail rather than overwriting the previous decision.
+// -----------------------------------------------------------------------------
+
+model RevisionReview {
+  id String @id @default(cuid())
+
+  // One review workspace per revision candidate.
+  candidateId String @unique
+  candidate   ScopeRevisionCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  // IN_PROGRESS = reviewer can still make decisions.
+  // FINALIZING  = finalization has begun.
+  // FINALIZED   = candidate became a new scope draft.
+  // DISCARDED   = review was explicitly abandoned.
+  status String @default("IN_PROGRESS")
+
+  // Set when the review successfully produces the next scope draft.
+  finalizedAt DateTime?
+
+  // Reviewer who completed the finalization.
+  finalizedById String?
+  finalizedBy   User? @relation("RevisionReviewFinalizedBy", fields: [finalizedById], references: [id], onDelete: Restrict)
+
+  // Full decision history for this review.
+  decisions RevisionReviewDecision[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Revision Review Decision
+//
+// Decisions are intentionally append-only.
+//
+// If a reviewer changes an item's decision from CARRY_OVER to REMOVE,
+// we create another row instead of overwriting the previous one.
+//
+// The latest decision for an item is the authoritative current decision,
+// while older rows remain available as an audit history.
+// -----------------------------------------------------------------------------
+
+model RevisionReviewDecision {
+  id String @id @default(cuid())
+
+  reviewId String
+  review   RevisionReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  // Stable scope item ID from the approved base scope.
+  itemId String
+
+  // Scope section containing the reviewed item.
+  // Examples:
+  // deliverables, features, exclusions, clientResponsibilities,
+  // revisionLimits, assumptions
+  section String
+
+  // CARRY_OVER or REMOVE
+  decision String
+
+  // Authenticated user who made this decision.
+  actorId String
+  actor   User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  // Immutable audit timestamp.
+  createdAt DateTime @default(now())
+
+  @@index([reviewId, itemId])
+  @@index([actorId])
 }

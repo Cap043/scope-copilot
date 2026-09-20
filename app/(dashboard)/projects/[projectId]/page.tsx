@@ -2,10 +2,17 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
 import { getProject } from "@/lib/projects";
+import {
+  getScopeVersionHistory,
+} from "@/lib/scope-versions";
+
 import { Button } from "@/components/ui/button";
 import { ScopeInput } from "@/components/projects/scope/scope-input";
 import { ScopeReview } from "@/components/projects/scope/scope-review";
+import { ScopeVersionHistory } from "@/components/projects/scope/scope-version-history";
+
 import type { NormalizedScope } from "@/lib/scope-schema";
+
 import {
   Card,
   CardContent,
@@ -41,7 +48,9 @@ export default async function ProjectPage({
             className="mt-4"
             variant="outline"
             nativeButton={false}
-            render={<Link href="/projects" />}
+            render={
+              <Link href="/projects" />
+            }
           >
             <ArrowLeft />
             Back to projects
@@ -51,7 +60,17 @@ export default async function ProjectPage({
     );
   }
 
-  const baseline = project.scopeBaselines[0];
+  // This remains the existing current/latest baseline used by the
+  // editable scope workspace.
+  const baseline =
+    project.scopeBaselines[0];
+
+  // Load every historical version independently from the current
+  // baseline so the project can browse the full version history.
+  const versionHistory =
+    await getScopeVersionHistory(
+      project.id,
+    );
 
   return (
     <div className="p-6 lg:p-8">
@@ -88,7 +107,10 @@ export default async function ProjectPage({
 
             <CardContent>
               <p className="text-2xl font-semibold">
-                ${Number(project.value).toLocaleString()}
+                $
+                {Number(
+                  project.value,
+                ).toLocaleString()}
               </p>
             </CardContent>
           </Card>
@@ -126,15 +148,30 @@ export default async function ProjectPage({
           </Card>
         </div>
 
+        {versionHistory.length > 0 && (
+          <div className="mt-8">
+            <ScopeVersionHistory
+              projectId={project.id}
+              versions={versionHistory}
+              currentVersion={
+                baseline?.version
+              }
+            />
+          </div>
+        )}
+
         {baseline ? (
           <Card className="mt-8">
             <CardHeader>
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <CardTitle>Scope</CardTitle>
+                  <CardTitle>
+                    Current scope
+                  </CardTitle>
 
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Scope baseline v{baseline.version}
+                    Latest scope baseline v
+                    {baseline.version}
                   </p>
                 </div>
 
@@ -158,13 +195,15 @@ export default async function ProjectPage({
               </div>
 
               <div className="mt-8">
-             <ScopeReview
-  key={baseline.id}
-  baselineId={baseline.id}
-  status={baseline.status}
-  projectId={project.id}
-  scope={baseline.structuredScope as NormalizedScope}
-/>
+                <ScopeReview
+                  key={baseline.id}
+                  baselineId={baseline.id}
+                  status={baseline.status}
+                  projectId={project.id}
+                  scope={
+                    baseline.structuredScope as NormalizedScope
+                  }
+                />
               </div>
             </CardContent>
           </Card>

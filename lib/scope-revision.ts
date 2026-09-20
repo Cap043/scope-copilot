@@ -1,18 +1,24 @@
 import { prisma } from "@/lib/db";
 import { getCurrentOrganizationId } from "@/lib/auth-session";
+import { getCurrentSession } from "@/lib/organization-access";
 import { extractScope } from "@/lib/ai/scope/extract";
 
-import {
-  diffScopes,
-} from "@/lib/scope-diff";
+import { diffScopes } from "@/lib/scope-diff";
 
 import {
   reconcileScopeIdentities,
+  type ReconciledScope,
 } from "@/lib/scope-reconciliation";
 
 import {
   applyManualCarryOverDecisions,
+  type CarriedOverScopeItem,
 } from "@/lib/scope-carryover";
+
+import {
+  buildCurrentRevisionDecisions,
+  type RevisionReviewDecisionRecord,
+} from "@/lib/scope-revision-review-state";
 
 import {
   extractedScopeSchema,
@@ -23,6 +29,7 @@ import {
   type ExtractedScope,
   type NormalizedScope,
 } from "@/lib/scope-schema";
+
 export type ScopeRevisionCandidateStatus =
   | "PENDING_REVIEW"
   | "RECONCILED"
@@ -99,7 +106,6 @@ export async function createScopeRevisionCandidate(data: {
     await extractScope(sourceText);
 
   // Validate candidate evidence against the NEW SOW text.
-  // This guarantees the candidate remains auditable before persistence.
   if (
     !validateExtractedScopeSourceReferences(
       extractedScope,
@@ -194,26 +200,24 @@ export async function getScopeUpdateContext(
   }
 
   const candidate =
-    await prisma.scopeRevisionCandidate.findFirst(
-      {
-        where: {
-          projectId: project.id,
-          baseBaselineId:
-            baseBaseline.id,
-          status: "PENDING_REVIEW",
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-        select: {
-          id: true,
-          status: true,
-          sourceType: true,
-          sourceText: true,
-          createdAt: true,
-        },
+    await prisma.scopeRevisionCandidate.findFirst({
+      where: {
+        projectId: project.id,
+        baseBaselineId:
+          baseBaseline.id,
+        status: "PENDING_REVIEW",
       },
-    );
+      orderBy: {
+        createdAt: "desc",
+      },
+      select: {
+        id: true,
+        status: true,
+        sourceType: true,
+        sourceText: true,
+        createdAt: true,
+      },
+    });
 
   return {
     project,
@@ -224,8 +228,6 @@ export async function getScopeUpdateContext(
 
 /**
  * Load one candidate through the active organization.
- *
- * This will be used by the later reconciliation workflow.
  */
 export async function getScopeRevisionCandidate(
   candidateId: string,
@@ -234,33 +236,31 @@ export async function getScopeRevisionCandidate(
     await getCurrentOrganizationId();
 
   const candidate =
-    await prisma.scopeRevisionCandidate.findFirst(
-      {
-        where: {
-          id: candidateId,
-          project: {
-            organizationId,
-          },
+    await prisma.scopeRevisionCandidate.findFirst({
+      where: {
+        id: candidateId,
+        project: {
+          organizationId,
         },
-        select: {
-          id: true,
-          projectId: true,
-          baseBaselineId: true,
-          status: true,
-          sourceType: true,
-          sourceText: true,
-          extractedScope: true,
-          createdAt: true,
-          updatedAt: true,
-          baseBaseline: {
-            select: {
-              version: true,
-              status: true,
-            },
+      },
+      select: {
+        id: true,
+        projectId: true,
+        baseBaselineId: true,
+        status: true,
+        sourceType: true,
+        sourceText: true,
+        extractedScope: true,
+        createdAt: true,
+        updatedAt: true,
+        baseBaseline: {
+          select: {
+            version: true,
+            status: true,
           },
         },
       },
-    );
+    });
 
   if (!candidate) {
     throw new Error(
@@ -270,6 +270,7 @@ export async function getScopeRevisionCandidate(
 
   return candidate;
 }
+
 /**
  * Convert one reconciliation item into the persisted scope shape.
  *
@@ -317,6 +318,114 @@ function materializeResolvedItem(
     status: "active",
   };
 }
+
+/**
+ * Merge explicit manual carry-over decisions into the reconciliation scope.
+ *
+ * `applyManualCarryOverDecisions()` intentionally returns carried-over items
+ * separately so the decision semantics stay explicit.
+ *
+ * Before materialization, however, a CARRY_OVER item must become part of the
+ * next persisted scope version. This helper performs that bridge.
+ */
+function mergeCarriedOverItems(
+  scope: ReconciledScope,
+  carriedOver: CarriedOverScopeItem[],
+): ReconciledScope {
+  if (carriedOver.length === 0) {
+    return scope;
+  }
+
+  const merged = {
+    ...scope,
+
+    deliverables: [
+      ...scope.deliverables,
+    ],
+
+    features: [
+      ...scope.features,
+    ],
+
+    exclusions: [
+      ...scope.exclusions,
+    ],
+
+    clientResponsibilities: [
+      ...scope.clientResponsibilities,
+    ],
+
+    revisionLimits: [
+      ...scope.revisionLimits,
+    ],
+
+    assumptions: [
+      ...scope.assumptions,
+    ],
+  };
+
+  for (const carried of carriedOver) {
+    /**
+     * A carried-over item keeps its original stable identity.
+     *
+     * These reconciliation-only fields are removed again by
+     * materializeResolvedItem(), but adding them here keeps the value
+     * compatible with the ReconciledScope contract.
+     */
+    const item = {
+      ...carried.item,
+      baseItemId: carried.item.id,
+      relation:
+        "MATCHED" as const,
+    };
+
+    switch (carried.section) {
+      case "deliverables":
+        merged.deliverables.push(
+          item as ReconciledScope["deliverables"][number],
+        );
+        break;
+
+      case "features":
+        merged.features.push(
+          item as ReconciledScope["features"][number],
+        );
+        break;
+
+      case "exclusions":
+        merged.exclusions.push(
+          item as ReconciledScope["exclusions"][number],
+        );
+        break;
+
+      case "clientResponsibilities":
+        merged.clientResponsibilities.push(
+          item as ReconciledScope["clientResponsibilities"][number],
+        );
+        break;
+
+      case "revisionLimits":
+        merged.revisionLimits.push(
+          item as ReconciledScope["revisionLimits"][number],
+        );
+        break;
+
+      case "assumptions":
+        merged.assumptions.push(
+          item as ReconciledScope["assumptions"][number],
+        );
+        break;
+
+      default:
+        throw new Error(
+          "Unsupported carried-over scope section.",
+        );
+    }
+  }
+
+  return merged;
+}
+
 /**
  * Convert a resolved reconciliation scope into the canonical persisted
  * NormalizedScope representation.
@@ -325,51 +434,77 @@ function materializeResolvedItem(
  * Manual carry-over items preserve their existing manual provenance.
  */
 export function materializeReconciledScope(
-  scope: {
-    deliverables: unknown[];
-    features: unknown[];
-    exclusions: unknown[];
-    clientResponsibilities: unknown[];
-    revisionLimits: unknown[];
-    timeline: ExtractedScope["timeline"];
-    assumptions: unknown[];
-  },
+  scope: ReconciledScope,
 ): NormalizedScope {
-  const materializeItems = (items: unknown[]) =>
-    items.map(materializeResolvedItem);
-
-  const hasTimelineContent =
-    Boolean(scope.timeline.duration?.trim()) ||
-    Boolean(scope.timeline.startCondition?.trim()) ||
-    scope.timeline.dependencies.length > 0 ||
-    scope.timeline.sourceReferences.length > 0;
-
   const materialized = {
-    deliverables: materializeItems(scope.deliverables),
-    features: materializeItems(scope.features),
-    exclusions: materializeItems(scope.exclusions),
-    clientResponsibilities: materializeItems(
-      scope.clientResponsibilities,
-    ),
-    revisionLimits: materializeItems(scope.revisionLimits),
+    deliverables:
+      scope.deliverables.map(
+        materializeResolvedItem,
+      ),
+
+    features:
+      scope.features.map(
+        materializeResolvedItem,
+      ),
+
+    exclusions:
+      scope.exclusions.map(
+        materializeResolvedItem,
+      ),
+
+    clientResponsibilities:
+      scope.clientResponsibilities.map(
+        materializeResolvedItem,
+      ),
+
+    revisionLimits:
+      scope.revisionLimits.map(
+        materializeResolvedItem,
+      ),
+
     timeline: {
       ...scope.timeline,
-
-      ...(hasTimelineContent
-        ? {
-            provenance: {
-              type: "document_extraction" as const,
-            },
-          }
-        : {}),
     },
-    assumptions: materializeItems(scope.assumptions),
+
+    assumptions:
+      scope.assumptions.map(
+        materializeResolvedItem,
+      ),
   };
 
-  const parsed = normalizedScopeSchema.safeParse(materialized);
+  const hasTimelineContent =
+    Boolean(
+      scope.timeline.duration?.trim(),
+    ) ||
+    Boolean(
+      scope.timeline.startCondition?.trim(),
+    ) ||
+    scope.timeline.dependencies
+      .length > 0 ||
+    scope.timeline.sourceReferences
+      .length > 0;
+
+  if (hasTimelineContent) {
+    (
+      materialized.timeline as Record<
+        string,
+        unknown
+      >
+    ).provenance = {
+      type:
+        "document_extraction",
+    };
+  }
+
+  const parsed =
+    normalizedScopeSchema.safeParse(
+      materialized,
+    );
 
   if (!parsed.success) {
-    throw new Error("Reconciled scope structure is invalid.");
+    throw new Error(
+      "Reconciled scope structure is invalid.",
+    );
   }
 
   return parsed.data;
@@ -378,272 +513,474 @@ export function materializeReconciledScope(
 /**
  * Finalize a reviewed revision candidate into the next DRAFT scope version.
  *
- * The browser only supplies human carry-over decisions.
- * The server re-runs reconciliation from trusted database state before
- * anything is persisted.
+ * Reviewer decisions are authoritative database state.
+ *
+ * The browser does NOT send decisions here.
+ *
+ * The server:
+ * 1. loads the trusted candidate/base scope
+ * 2. recomputes diff/reconciliation
+ * 3. loads the append-only review decision history
+ * 4. resolves the latest decision per item
+ * 5. applies those decisions
+ * 6. merges explicit carry-over items into the next scope
+ * 7. creates the next DRAFT
+ * 8. marks the review/candidate as finalized
  */
-export async function finalizeScopeRevisionCandidate(data: {
-  candidateId: string;
-  decisions: Record<string, "CARRY_OVER" | "REMOVE">;
-}) {
-  const organizationId = await getCurrentOrganizationId();
+export async function finalizeScopeRevisionCandidate(
+  data: {
+    candidateId: string;
+  },
+) {
+  const organizationId =
+    await getCurrentOrganizationId();
 
-  return prisma.$transaction(async (tx) => {
-    const candidate =
-      await tx.scopeRevisionCandidate.findFirst({
-        where: {
-          id: data.candidateId,
-          project: {
-            organizationId,
-          },
-        },
-        select: {
-          id: true,
-          projectId: true,
-          baseBaselineId: true,
-          status: true,
-          sourceType: true,
-          sourceText: true,
-          extractedScope: true,
-        },
-      });
+  const session =
+    await getCurrentSession();
 
-    if (!candidate) {
-      throw new Error(
-        "Scope revision candidate not found.",
-      );
-    }
-
-    if (candidate.status !== "PENDING_REVIEW") {
-      throw new Error(
-        "Only pending scope revisions can be finalized.",
-      );
-    }
-
-    const baseBaseline =
-      await tx.scopeBaseline.findFirst({
-        where: {
-          id: candidate.baseBaselineId,
-          projectId: candidate.projectId,
-          status: "APPROVED",
-        },
-        select: {
-          id: true,
-          version: true,
-          status: true,
-          sourceText: true,
-          structuredScope: true,
-        },
-      });
-
-    if (!baseBaseline) {
-      throw new Error(
-        "The approved base scope for this revision no longer exists.",
-      );
-    }
-
-    // The candidate must still be based on the latest approved version.
-    const latestApproved =
-      await tx.scopeBaseline.findFirst({
-        where: {
-          projectId: candidate.projectId,
-          status: "APPROVED",
-        },
-        orderBy: {
-          version: "desc",
-        },
-        select: {
-          id: true,
-          version: true,
-        },
-      });
-
-    if (
-      !latestApproved ||
-      latestApproved.id !== baseBaseline.id
-    ) {
-      throw new Error(
-        "This revision is stale. The project has a newer approved scope version.",
-      );
-    }
-
-    // No later draft/version may have appeared while this revision
-    // was under review.
-    const latestBaseline =
-      await tx.scopeBaseline.findFirst({
-        where: {
-          projectId: candidate.projectId,
-        },
-        orderBy: {
-          version: "desc",
-        },
-        select: {
-          id: true,
-          version: true,
-          status: true,
-        },
-      });
-
-    if (
-      !latestBaseline ||
-      latestBaseline.id !== baseBaseline.id
-    ) {
-      throw new Error(
-        "A newer scope version already exists for this project.",
-      );
-    }
-
-    const parsedBase =
-      parseStoredScope(baseBaseline.structuredScope);
-
-    if (!parsedBase.success) {
-      throw new Error(
-        "Base scope structure is invalid.",
-      );
-    }
-
-    if (
-      !validateScopeSourceReferences(
-        parsedBase.data,
-        baseBaseline.sourceText,
-      )
-    ) {
-      throw new Error(
-        "Base scope contains invalid source references.",
-      );
-    }
-
-    const parsedCandidate =
-      extractedScopeSchema.safeParse(
-        candidate.extractedScope,
-      );
-
-    if (!parsedCandidate.success) {
-      throw new Error(
-        "Revision candidate extraction is invalid.",
-      );
-    }
-
-    const candidateScope =
-      parsedCandidate.data;
-
-    if (
-      !validateExtractedScopeSourceReferences(
-        candidateScope,
-        candidate.sourceText,
-      )
-    ) {
-      throw new Error(
-        "Revision candidate contains invalid source references.",
-      );
-    }
-
-    // Re-run the complete reconciliation from trusted DB state.
-    // Never trust the browser's previous diff result.
-    const diff = diffScopes(
-      parsedBase.data,
-      candidateScope,
+  if (!session) {
+    throw new Error(
+      "Unauthorized",
     );
+  }
 
-    const reconciliation =
-      reconcileScopeIdentities(
+  return prisma.$transaction(
+    async (tx) => {
+      const candidate =
+        await tx.scopeRevisionCandidate.findFirst({
+          where: {
+            id: data.candidateId,
+            project: {
+              organizationId,
+            },
+          },
+          select: {
+            id: true,
+            projectId: true,
+            baseBaselineId: true,
+            status: true,
+            sourceType: true,
+            sourceText: true,
+            extractedScope: true,
+          },
+        });
+
+      if (!candidate) {
+        throw new Error(
+          "Scope revision candidate not found.",
+        );
+      }
+
+      if (
+        candidate.status !==
+        "PENDING_REVIEW"
+      ) {
+        throw new Error(
+          "Only pending scope revisions can be finalized.",
+        );
+      }
+
+      const baseBaseline =
+        await tx.scopeBaseline.findFirst({
+          where: {
+            id: candidate.baseBaselineId,
+            projectId:
+              candidate.projectId,
+            status: "APPROVED",
+          },
+          select: {
+            id: true,
+            version: true,
+            status: true,
+            sourceText: true,
+            structuredScope: true,
+          },
+        });
+
+      if (!baseBaseline) {
+        throw new Error(
+          "The approved base scope for this revision no longer exists.",
+        );
+      }
+
+      // The candidate must still be based on the latest approved version.
+      const latestApproved =
+        await tx.scopeBaseline.findFirst({
+          where: {
+            projectId:
+              candidate.projectId,
+            status: "APPROVED",
+          },
+          orderBy: {
+            version: "desc",
+          },
+          select: {
+            id: true,
+            version: true,
+          },
+        });
+
+      if (
+        !latestApproved ||
+        latestApproved.id !==
+          baseBaseline.id
+      ) {
+        throw new Error(
+          "This revision is stale. The project has a newer approved scope version.",
+        );
+      }
+
+      // No later draft/version may have appeared while this revision
+      // was under review.
+      const latestBaseline =
+        await tx.scopeBaseline.findFirst({
+          where: {
+            projectId:
+              candidate.projectId,
+          },
+          orderBy: {
+            version: "desc",
+          },
+          select: {
+            id: true,
+            version: true,
+            status: true,
+          },
+        });
+
+      if (
+        !latestBaseline ||
+        latestBaseline.id !==
+          baseBaseline.id
+      ) {
+        throw new Error(
+          "A newer scope version already exists for this project.",
+        );
+      }
+
+      const parsedBase =
+        parseStoredScope(
+          baseBaseline.structuredScope,
+        );
+
+      if (!parsedBase.success) {
+        throw new Error(
+          "Base scope structure is invalid.",
+        );
+      }
+
+      if (
+        !validateScopeSourceReferences(
+          parsedBase.data,
+          baseBaseline.sourceText,
+        )
+      ) {
+        throw new Error(
+          "Base scope contains invalid source references.",
+        );
+      }
+
+      const parsedCandidate =
+        extractedScopeSchema.safeParse(
+          candidate.extractedScope,
+        );
+
+      if (!parsedCandidate.success) {
+        throw new Error(
+          "Revision candidate extraction is invalid.",
+        );
+      }
+
+      const candidateScope =
+        parsedCandidate.data;
+
+      if (
+        !validateExtractedScopeSourceReferences(
+          candidateScope,
+          candidate.sourceText,
+        )
+      ) {
+        throw new Error(
+          "Revision candidate contains invalid source references.",
+        );
+      }
+
+      // Re-run the complete reconciliation from trusted DB state.
+      // Never trust the browser's previous diff result.
+      const diff = diffScopes(
         parsedBase.data,
         candidateScope,
-        diff,
       );
 
-    // 9D applies the explicit manual carry-over decisions.
-    const resolved =
-      applyManualCarryOverDecisions(
-        reconciliation,
-        data.decisions as Parameters<
-          typeof applyManualCarryOverDecisions
-        >[1],
-      );
+      const reconciliation =
+        reconcileScopeIdentities(
+          parsedBase.data,
+          candidateScope,
+          diff,
+        );
 
-    // Document-derived missing items are absent from the new SOW and
-    // therefore remain omitted. Manual amendments and reappeared
-    // previously-removed items are the cases that require explicit
-    // reconciliation.
-    const blockingUnresolved =
-      resolved.unresolved.filter(
-        (entry) =>
-          entry.reason ===
-            "REMOVED_ITEM_REAPPEARED" ||
-          (
+      /**
+       * Every candidate gets one durable review workspace.
+       */
+      const review =
+        await tx.revisionReview.upsert({
+          where: {
+            candidateId:
+              candidate.id,
+          },
+
+          update: {},
+
+          create: {
+            candidateId:
+              candidate.id,
+
+            status:
+              "IN_PROGRESS",
+          },
+
+          select: {
+            id: true,
+            status: true,
+          },
+        });
+
+      if (
+        review.status !==
+        "IN_PROGRESS"
+      ) {
+        throw new Error(
+          "This revision review is no longer accepting finalization.",
+        );
+      }
+
+      /**
+       * Load every persisted reviewer decision.
+       *
+       * Older decisions remain in the database. The latest decision
+       * for each item is reconstructed below.
+       */
+      const decisionRows =
+        await tx.revisionReviewDecision.findMany(
+          {
+            where: {
+              reviewId:
+                review.id,
+            },
+
+            orderBy: [
+              {
+                createdAt:
+                  "asc",
+              },
+
+              {
+                id:
+                  "asc",
+              },
+            ],
+
+            select: {
+              id: true,
+              itemId: true,
+              section: true,
+              decision: true,
+              actorId: true,
+              createdAt: true,
+            },
+          },
+        );
+
+      const decisionHistory: RevisionReviewDecisionRecord[] =
+        decisionRows.map(
+          (record) => ({
+            id: record.id,
+
+            itemId:
+              record.itemId,
+
+            section:
+              record.section,
+
+            decision:
+              record.decision as RevisionReviewDecisionRecord["decision"],
+
+            actorId:
+              record.actorId,
+
+            // Actor names are not required for finalization.
+            // They are loaded by the read-model when displaying history.
+            actorName: "",
+
+            actorEmail: "",
+
+            createdAt:
+              record.createdAt.toISOString(),
+          }),
+        );
+
+      const decisions =
+        buildCurrentRevisionDecisions(
+          decisionHistory,
+        );
+
+      /**
+       * Apply only server-persisted decisions.
+       *
+       * The result intentionally separates carried-over items from the
+       * ordinary reconciled candidate scope.
+       */
+      const resolved =
+        applyManualCarryOverDecisions(
+          reconciliation,
+          decisions,
+        );
+
+      // Document-derived missing items may disappear.
+      // Manual amendments and reappeared removed items remain blocking.
+      const blockingUnresolved =
+        resolved.unresolved.filter(
+          (entry) =>
             entry.reason ===
-              "MISSING_ACTIVE_ITEM" &&
-            entry.entry.baseItem?.provenance
-              .type === "manual_amendment"
-          ),
-      );
+              "REMOVED_ITEM_REAPPEARED" ||
+            (
+              entry.reason ===
+                "MISSING_ACTIVE_ITEM" &&
+              entry.entry.baseItem
+                ?.provenance.type ===
+                "manual_amendment"
+            ),
+        );
 
-    if (blockingUnresolved.length > 0) {
-      throw new Error(
-        "The scope revision still contains unresolved changes.",
-      );
-    }
+      if (
+        blockingUnresolved.length >
+        0
+      ) {
+        throw new Error(
+          "The scope revision still contains unresolved changes.",
+        );
+      }
 
-    const structuredScope =
-      materializeReconciledScope(
-        resolved.scope,
-      );
+      /**
+       * IMPORTANT:
+       *
+       * CARRY_OVER is a real scope decision.
+       * Therefore those items must be merged into the scope BEFORE
+       * materialization rather than remaining only in the metadata result.
+       */
+      const resolvedScope =
+        mergeCarriedOverItems(
+          resolved.scope,
+          resolved.carriedOver,
+        );
 
-    if (
-      !validateScopeSourceReferences(
-        structuredScope,
-        candidate.sourceText,
-      )
-    ) {
-      throw new Error(
-        "Finalized scope contains invalid source references.",
-      );
-    }
+      const structuredScope =
+        materializeReconciledScope(
+          resolvedScope,
+        );
 
-    const nextVersion =
-      baseBaseline.version + 1;
-
-    const newBaseline =
-      await tx.scopeBaseline.create({
-        data: {
-          projectId: candidate.projectId,
-          version: nextVersion,
-          status: "DRAFT",
-          sourceType: candidate.sourceType,
-          sourceText: candidate.sourceText,
+      if (
+        !validateScopeSourceReferences(
           structuredScope,
-        },
-        select: {
-          id: true,
-          projectId: true,
-          version: true,
-          status: true,
-        },
-      });
+          candidate.sourceText,
+        )
+      ) {
+        throw new Error(
+          "Finalized scope contains invalid source references.",
+        );
+      }
 
-    const candidateUpdate =
-      await tx.scopeRevisionCandidate.updateMany({
+      const nextVersion =
+        baseBaseline.version + 1;
+
+      const newBaseline =
+        await tx.scopeBaseline.create({
+          data: {
+            projectId:
+              candidate.projectId,
+
+            version:
+              nextVersion,
+
+            status:
+              "DRAFT",
+
+            sourceType:
+              candidate.sourceType,
+
+            sourceText:
+              candidate.sourceText,
+
+            structuredScope,
+          },
+
+          select: {
+            id: true,
+            projectId: true,
+            version: true,
+            status: true,
+          },
+        });
+
+      // Persist final reviewer identity and completion time.
+      await tx.revisionReview.update({
         where: {
-          id: candidate.id,
-          status: "PENDING_REVIEW",
+          id: review.id,
         },
+
         data: {
-          status: "RECONCILED",
+          status:
+            "FINALIZED",
+
+          finalizedAt:
+            new Date(),
+
+          finalizedById:
+            session.user.id,
         },
       });
 
-    if (candidateUpdate.count !== 1) {
-      throw new Error(
-        "Scope revision candidate changed while it was being finalized.",
-      );
-    }
+      const candidateUpdate =
+        await tx.scopeRevisionCandidate.updateMany(
+          {
+            where: {
+              id: candidate.id,
+              status:
+                "PENDING_REVIEW",
+            },
 
-    return {
-      candidateId: candidate.id,
-      projectId: newBaseline.projectId,
-      baselineId: newBaseline.id,
-      version: newBaseline.version,
-      status: newBaseline.status,
-    };
-  });
+            data: {
+              status:
+                "RECONCILED",
+            },
+          },
+        );
+
+      if (
+        candidateUpdate.count !==
+        1
+      ) {
+        throw new Error(
+          "Scope revision candidate changed while it was being finalized.",
+        );
+      }
+
+      return {
+        candidateId:
+          candidate.id,
+
+        projectId:
+          newBaseline.projectId,
+
+        baselineId:
+          newBaseline.id,
+
+        version:
+          newBaseline.version,
+
+        status:
+          newBaseline.status,
+      };
+    },
+  );
 }
