@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { ArrowUpRight, CalendarDays } from "lucide-react";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  ArrowUpRight,
+  CalendarDays,
+  CircleDollarSign,
+} from "lucide-react";
+
+import { Card, CardContent } from "@/components/ui/card";
 
 type ProjectCardProps = {
   project: {
@@ -19,46 +19,89 @@ type ProjectCardProps = {
   };
 };
 
-export function ProjectCard({ project }: ProjectCardProps) {
+function formatCurrency(value: unknown) {
+  const amount = Number(value);
+
+  if (!Number.isFinite(amount)) {
+    return "$0";
+  }
+
+  return `$${amount.toLocaleString("en-US", {
+    maximumFractionDigits: 0,
+  })}`;
+}
+
+function formatDate(date: Date | null) {
+  if (!date) {
+    return "Not set";
+  }
+
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+export function ProjectCard({
+  project,
+}: ProjectCardProps) {
   return (
-    <Link href={`/projects/${project.id}`} className="block">
-      <Card className="transition-colors hover:bg-muted/30">
-        <CardHeader className="flex flex-row items-start justify-between gap-4">
-          <div>
-            <CardTitle>{project.name}</CardTitle>
+    <Link
+      href={`/projects/${project.id}`}
+      className="group block h-full"
+    >
+      <Card className="h-full border-border/80 transition-all duration-150 hover:-translate-y-px hover:border-border hover:shadow-md">
+        <CardContent className="flex h-full flex-col p-5">
+          {/* Project identity */}
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h2 className="truncate text-[15px] font-semibold tracking-[-0.01em]">
+                {project.name}
+              </h2>
 
-            <p className="mt-1 text-sm text-muted-foreground">
-              {project.client.name}
-            </p>
-          </div>
-
-          <ArrowUpRight className="size-4 text-muted-foreground" />
-        </CardHeader>
-
-        <CardContent>
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-            <div>
-              <p className="text-xs text-muted-foreground">
-                Project value
-              </p>
-
-              <p className="mt-1 font-medium">
-                ${Number(project.value).toLocaleString()}
+              <p className="mt-1 truncate text-sm text-muted-foreground">
+                {project.client.name}
               </p>
             </div>
 
-            {project.targetEndDate && (
-              <div>
-                <p className="text-xs text-muted-foreground">
-                  Target end
-                </p>
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors group-hover:text-foreground">
+              <ArrowUpRight className="size-4" />
+            </div>
+          </div>
 
-                <p className="mt-1 flex items-center gap-1.5 font-medium">
-                  <CalendarDays className="size-3.5" />
-                  {project.targetEndDate.toLocaleDateString()}
-                </p>
+          {/* Project metadata */}
+          <div className="mt-6 grid grid-cols-2 gap-4 border-t border-border/70 pt-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <CircleDollarSign className="size-3.5" />
+                <span>Project value</span>
               </div>
-            )}
+
+              <p className="mt-1.5 text-lg font-semibold tracking-tight">
+                {formatCurrency(project.value)}
+              </p>
+            </div>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <CalendarDays className="size-3.5" />
+                <span>Target end</span>
+              </div>
+
+              <p className="mt-1.5 truncate text-sm font-medium">
+                {formatDate(project.targetEndDate)}
+              </p>
+            </div>
+          </div>
+
+          {/* Footer affordance */}
+          <div className="mt-auto flex items-center justify-between pt-5 text-xs text-muted-foreground">
+            <span>Open project</span>
+
+            <span className="transition-transform duration-150 group-hover:translate-x-0.5">
+              →
+            </span>
           </div>
         </CardContent>
       </Card>
