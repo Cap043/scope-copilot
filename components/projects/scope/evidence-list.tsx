@@ -1,12 +1,14 @@
 "use client";
 
+import { FileText } from "lucide-react";
+
 import type { SourceReference } from "./scope-types";
 
 /**
- * Evidence always comes from the original SOW.
+ * Evidence is always visible when an item is selected.
  *
- * It is intentionally read-only so amendments cannot silently
- * rewrite the original evidence trail.
+ * Evidence is immutable source material from the original SOW,
+ * so it should be immediately inspectable without another click.
  */
 export function EvidenceList({
   references,
@@ -18,27 +20,43 @@ export function EvidenceList({
   }
 
   return (
-    <div className="mt-3 space-y-2">
-      {references.map((reference, index) => (
-        <div
-          key={`${reference.quote}-${index}`}
-          className="rounded-md bg-muted/50 p-3"
-        >
-          <p className="text-xs font-medium text-muted-foreground">
-            Evidence
-          </p>
+    <div className="mt-5">
+      <div className="flex items-center gap-2">
+        <FileText className="size-4 text-muted-foreground" />
 
-          <p className="mt-1 whitespace-pre-wrap font-mono text-xs">
-            {reference.quote}
-          </p>
+        <h4 className="text-sm font-semibold">
+          Source evidence
+        </h4>
 
-          {reference.section && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              {reference.section}
+        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+          {references.length}
+        </span>
+      </div>
+
+      <div className="mt-3 space-y-2.5">
+        {references.map((reference, index) => (
+          <div
+            key={`${reference.quote}-${index}`}
+            className="rounded-lg border border-border/70 bg-muted/20 p-3.5"
+          >
+            <p className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-foreground/90">
+              {reference.quote}
             </p>
-          )}
-        </div>
-      ))}
+
+            {reference.section && (
+              <div className="mt-3 border-t border-border/60 pt-2.5">
+                <p className="text-[11px] text-muted-foreground">
+                  Source section
+                </p>
+
+                <p className="mt-0.5 text-xs font-medium text-foreground/80">
+                  {reference.section}
+                </p>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

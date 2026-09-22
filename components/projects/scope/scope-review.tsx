@@ -1,430 +1,147 @@
 "use client";
 
-import { Check, Plus } from "lucide-react";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { useMemo } from "react";
 
-import { AddAssumptionForm } from "./add-assumption-form";
-import { AddRevisionLimitForm } from "./add-revision-limit-form";
-import { AssumptionCard } from "./assumption-card";
-import { RevisionLimitCard } from "./revision-limit-card";
-import { ScopeItemList } from "./scope-item-list";
-import { TimelineEditor } from "./timeline-editor";
 import { useScopeReview } from "./use-scope-review";
-import type { ScopeReviewProps } from "./scope-types";
+import { ScopeDetailPanel } from "./review/scope-detail-panel";
+import { ScopeSummary } from "./review/scope-summary";
+import { ScopeToolbar } from "./review/scope-toolbar";
+import { ScopeWorkspace } from "./review/scope-workspace";
+import {
+  STANDARD_SECTIONS,
+} from "./review/section-meta";
+import {
+  useScopeReviewNavigation,
+} from "./review/use-scope-review-navigation";
+import type {
+  ScopeReviewViewProps,
+  StandardSection,
+} from "./review/types";
 
-export function ScopeReview(props: ScopeReviewProps) {
-  const {
-    reviewScope,
-    currentStatus,
-    savingSection,
-    addFormSection,
-    setAddFormSection,
-    approving,
-    creatingVersion,
-    saveError,
-    editable,
-    handleApprove,
-    handleCreateVersion,
-    handleEditItem,
-    handleEditRevisionLimit,
-    handleEditAssumption,
-    handleRemoveItem,
-    handleRemoveRevisionLimit,
-    handleRemoveAssumption,
-    handleAddStandardItem,
-    handleAddRevisionLimit,
-    handleAddAssumption,
-    handleTimelineSave,
-  } = useScopeReview(props);
+export type { ScopeReviewViewProps } from "./review/types";
+
+export function ScopeReview(
+  props: ScopeReviewViewProps,
+) {
+  const controller = useScopeReview(props);
+
+  const navigation =
+    useScopeReviewNavigation({
+      reviewScope: controller.reviewScope,
+      setAddFormSection:
+        controller.setAddFormSection,
+    });
+
+  // Keep the standard-section derivation in the orchestrator so
+  // presentation components stay focused on rendering.
+  const activeStandardItems = useMemo(() => {
+    if (
+      !STANDARD_SECTIONS.includes(
+        navigation.activeSection as StandardSection,
+      )
+    ) {
+      return [];
+    }
+
+    return controller.reviewScope[
+      navigation.activeSection as StandardSection
+    ].filter(
+      (item) => item.status === "active",
+    );
+  }, [
+    controller.reviewScope,
+    navigation.activeSection,
+  ]);
 
   return (
-    <div className="space-y-8">
-      {currentStatus === "DRAFT" && (
-        <div className="flex items-center justify-between rounded-lg border p-4">
-          <div>
-            <p className="font-medium">
-              Review scope
-            </p>
-
-            <p className="mt-1 text-sm text-muted-foreground">
-              Review the extracted scope and record any
-              agreed amendments before making it authoritative.
-            </p>
-          </div>
-
-          <Button
-            type="button"
-            onClick={handleApprove}
-            disabled={
-              approving ||
-              Boolean(savingSection)
-            }
-          >
-            <Check />
-            {approving
-              ? "Approving..."
-              : "Approve scope"}
-          </Button>
-        </div>
-      )}
-
-      {currentStatus === "APPROVED" && (
-        <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
-          <div>
-            <p className="font-medium">
-              Scope approved
-            </p>
-
-            <p className="mt-1 text-sm text-muted-foreground">
-              This scope is now the authoritative project baseline.
-            </p>
-          </div>
-
-          <div className="flex shrink-0 gap-2">
-  <Button
-    type="button"
-    variant="outline"
-    nativeButton={false}
-    render={
-      <Link
-        href={`/projects/${props.projectId}/scope/update`}
-      />
-    }
-  >
-    <Plus />
-    Update from new SOW
-  </Button>
-
-  <Button
-    type="button"
-    variant="outline"
-    onClick={handleCreateVersion}
-    disabled={creatingVersion}
-  >
-    <Plus />
-    {creatingVersion
-      ? "Creating version..."
-      : "Create new scope version"}
-  </Button>
-</div>
-        </div>
-      )}
-
-      {savingSection && (
-        <p className="text-sm text-muted-foreground">
-          Saving changes...
-        </p>
-      )}
-
-      {saveError && (
-        <p className="text-sm text-destructive">
-          {saveError}
-        </p>
-      )}
-
-      <ScopeItemList
-        section="deliverables"
-        title="Deliverables"
-        items={reviewScope.deliverables}
-        editable={editable}
-        saving={
-          savingSection ===
-          "deliverables"
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <ScopeToolbar
+        projectId={props.projectId}
+        scopeVersion={props.scopeVersion}
+        sourceText={props.sourceText}
+        currentStatus={controller.currentStatus}
+        savingSection={controller.savingSection}
+        approving={controller.approving}
+        creatingVersion={controller.creatingVersion}
+        saveError={controller.saveError}
+        handleApprove={controller.handleApprove}
+        handleCreateVersion={
+          controller.handleCreateVersion
         }
-        addFormOpen={
-          addFormSection ===
-          "deliverables"
-        }
-        onStartAdd={() =>
-          setAddFormSection(
-            "deliverables",
-          )
-        }
-        onCancelAdd={() =>
-          setAddFormSection(null)
-        }
-        onAdd={(item, meta) =>
-          handleAddStandardItem(
-            "deliverables",
-            item,
-            meta,
-          )
-        }
-        onEdit={handleEditItem.bind(
-          null,
-          "deliverables",
-        )}
-        onRemove={handleRemoveItem.bind(
-          null,
-          "deliverables",
-        )}
       />
 
-      <ScopeItemList
-        section="features"
-        title="Features"
-        items={reviewScope.features}
-        editable={editable}
-        saving={
-          savingSection === "features"
-        }
-        addFormOpen={
-          addFormSection === "features"
-        }
-        onStartAdd={() =>
-          setAddFormSection("features")
-        }
-        onCancelAdd={() =>
-          setAddFormSection(null)
-        }
-        onAdd={(item, meta) =>
-          handleAddStandardItem(
-            "features",
-            item,
-            meta,
-          )
-        }
-        onEdit={handleEditItem.bind(
-          null,
-          "features",
-        )}
-        onRemove={handleRemoveItem.bind(
-          null,
-          "features",
-        )}
+      <ScopeSummary
+        reviewScope={controller.reviewScope}
+        activeSection={navigation.activeSection}
+        onSelectSection={navigation.selectSection}
       />
 
-      <ScopeItemList
-        section="exclusions"
-        title="Exclusions"
-        items={reviewScope.exclusions}
-        editable={editable}
-        saving={
-          savingSection === "exclusions"
-        }
-        addFormOpen={
-          addFormSection === "exclusions"
-        }
-        onStartAdd={() =>
-          setAddFormSection(
-            "exclusions",
-          )
-        }
-        onCancelAdd={() =>
-          setAddFormSection(null)
-        }
-        onAdd={(item, meta) =>
-          handleAddStandardItem(
-            "exclusions",
-            item,
-            meta,
-          )
-        }
-        onEdit={handleEditItem.bind(
-          null,
-          "exclusions",
-        )}
-        onRemove={handleRemoveItem.bind(
-          null,
-          "exclusions",
-        )}
-      />
+      <div className="grid min-h-0 flex-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1fr)_360px]">
+        <ScopeWorkspace
+          editable={controller.editable}
+          activeSection={navigation.activeSection}
+          selectedItemId={navigation.selectedItemId}
+          setSelectedItemId={
+            navigation.setSelectedItemId
+          }
+          activeItems={navigation.activeItems}
+          activeStandardItems={activeStandardItems}
+          addFormSection={controller.addFormSection}
+          setAddFormSection={
+            controller.setAddFormSection
+          }
+          reviewScope={controller.reviewScope}
+          onSelectSection={navigation.selectSection}
+        />
 
-      <ScopeItemList
-        section="clientResponsibilities"
-        title="Client Responsibilities"
-        items={
-          reviewScope.clientResponsibilities
-        }
-        editable={editable}
-        saving={
-          savingSection ===
-          "clientResponsibilities"
-        }
-        addFormOpen={
-          addFormSection ===
-          "clientResponsibilities"
-        }
-        onStartAdd={() =>
-          setAddFormSection(
-            "clientResponsibilities",
-          )
-        }
-        onCancelAdd={() =>
-          setAddFormSection(null)
-        }
-        onAdd={(item, meta) =>
-          handleAddStandardItem(
-            "clientResponsibilities",
-            item,
-            meta,
-          )
-        }
-        onEdit={handleEditItem.bind(
-          null,
-          "clientResponsibilities",
-        )}
-        onRemove={handleRemoveItem.bind(
-          null,
-          "clientResponsibilities",
-        )}
-      />
-
-      <section>
-        <div className="flex items-center justify-between gap-4">
-          <h3 className="text-sm font-semibold">
-            Revision Limits
-          </h3>
-
-          {editable &&
-            addFormSection !==
-              "revisionLimits" && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setAddFormSection(
-                    "revisionLimits",
-                  )
-                }
-              >
-                <Plus />
-                Add
-              </Button>
-            )}
-        </div>
-
-        <div className="mt-3 space-y-3">
-          {reviewScope.revisionLimits.map(
-            (item) => (
-              <RevisionLimitCard
-                key={item.id}
-                item={item}
-                editable={editable}
-                saving={
-                  savingSection ===
-                  "revisionLimits"
-                }
-                onSave={
-                  handleEditRevisionLimit
-                }
-                onRemove={
-                  handleRemoveRevisionLimit
-                }
-              />
-            ),
-          )}
-
-          {reviewScope.revisionLimits.length ===
-            0 &&
-            addFormSection !==
-              "revisionLimits" && (
-              <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                No revision limits.
-              </p>
-            )}
-
-          {addFormSection ===
-            "revisionLimits" && (
-            <AddRevisionLimitForm
-              saving={
-                savingSection ===
-                "revisionLimits"
-              }
-              onCancel={() =>
-                setAddFormSection(null)
-              }
-              onAdd={
-                handleAddRevisionLimit
-              }
-            />
-          )}
-        </div>
-      </section>
-
-      <TimelineEditor
-        timeline={reviewScope.timeline}
-        editable={editable}
-        saving={
-          savingSection === "timeline"
-        }
-        onSave={handleTimelineSave}
-      />
-
-      <section>
-        <div className="flex items-center justify-between gap-4">
-          <h3 className="text-sm font-semibold">
-            Assumptions
-          </h3>
-
-          {editable &&
-            addFormSection !==
-              "assumptions" && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setAddFormSection(
-                    "assumptions",
-                  )
-                }
-              >
-                <Plus />
-                Add
-              </Button>
-            )}
-        </div>
-
-        <div className="mt-3 space-y-3">
-          {reviewScope.assumptions.map(
-            (item) => (
-              <AssumptionCard
-                key={item.id}
-                item={item}
-                editable={editable}
-                saving={
-                  savingSection ===
-                  "assumptions"
-                }
-                onSave={
-                  handleEditAssumption
-                }
-                onRemove={
-                  handleRemoveAssumption
-                }
-              />
-            ),
-          )}
-
-          {reviewScope.assumptions.length ===
-            0 &&
-            addFormSection !==
-              "assumptions" && (
-              <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                No assumptions.
-              </p>
-            )}
-
-          {addFormSection ===
-            "assumptions" && (
-            <AddAssumptionForm
-              saving={
-                savingSection ===
-                "assumptions"
-              }
-              onCancel={() =>
-                setAddFormSection(null)
-              }
-              onAdd={
-                handleAddAssumption
-              }
-            />
-          )}
-        </div>
-      </section>
+        <ScopeDetailPanel
+          editable={controller.editable}
+          savingSection={controller.savingSection}
+          addFormSection={controller.addFormSection}
+          setAddFormSection={
+            controller.setAddFormSection
+          }
+          handleEditItem={controller.handleEditItem}
+          handleEditRevisionLimit={
+            controller.handleEditRevisionLimit
+          }
+          handleEditAssumption={
+            controller.handleEditAssumption
+          }
+          handleRemoveItem={
+            controller.handleRemoveItem
+          }
+          handleRemoveRevisionLimit={
+            controller.handleRemoveRevisionLimit
+          }
+          handleRemoveAssumption={
+            controller.handleRemoveAssumption
+          }
+          handleAddStandardItem={
+            controller.handleAddStandardItem
+          }
+          handleAddRevisionLimit={
+            controller.handleAddRevisionLimit
+          }
+          handleAddAssumption={
+            controller.handleAddAssumption
+          }
+          handleTimelineSave={
+            controller.handleTimelineSave
+          }
+          reviewScope={controller.reviewScope}
+          activeSection={navigation.activeSection}
+          selectedStandardItem={
+            navigation.selectedStandardItem
+          }
+          selectedRevisionLimit={
+            navigation.selectedRevisionLimit
+          }
+          selectedAssumption={
+            navigation.selectedAssumption
+          }
+        />
+      </div>
     </div>
   );
 }

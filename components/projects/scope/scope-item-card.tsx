@@ -1,18 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Pencil, Trash2, X } from "lucide-react";
+import {
+  Check,
+  Pencil,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
 import { AmendmentFields } from "./amendment-fields";
 import { ChangeMetadata } from "./change-metadata";
 import { EvidenceList } from "./evidence-list";
-import type { AmendmentMeta, ScopeItem } from "./scope-types";
+import type {
+  AmendmentMeta,
+  ScopeItem,
+} from "./scope-types";
 
-/**
- * Generic editor for standard scope items.
- */
 export function ScopeItemCard({
   item,
   editable,
@@ -77,7 +82,8 @@ export function ScopeItemCard({
 
   async function handleSave() {
     const trimmedTitle = title.trim();
-    const trimmedRationale = rationale.trim();
+    const trimmedRationale =
+      rationale.trim();
     const trimmedReference =
       referenceId.trim();
 
@@ -125,7 +131,8 @@ export function ScopeItemCard({
   }
 
   async function handleRemove() {
-    const trimmedRationale = rationale.trim();
+    const trimmedRationale =
+      rationale.trim();
     const trimmedReference =
       referenceId.trim();
 
@@ -162,41 +169,39 @@ export function ScopeItemCard({
     }
   }
 
-  return (
-    <div
-      className={`rounded-lg border p-4 ${
-        item.status === "removed"
-          ? "opacity-60"
-          : ""
-      }`}
-    >
-      {item.status === "removed" ? (
-        <>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="font-medium line-through">
-                {item.title}
-              </p>
+  if (item.status === "removed") {
+    return (
+      <div className="px-4 py-3 opacity-60 sm:px-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium line-through">
+              {item.title}
+            </p>
 
-              {item.description && (
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {item.description}
-                </p>
-              )}
-
-              <p className="mt-2 text-xs font-medium text-destructive">
-                Removed from active scope
+            {item.description && (
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {item.description}
               </p>
-            </div>
+            )}
+
+            <p className="mt-1.5 text-[11px] font-medium text-destructive">
+              Removed from active scope
+            </p>
+
+            <ChangeMetadata item={item} />
+
+            <EvidenceList
+              references={item.sourceReferences}
+            />
           </div>
+        </div>
+      </div>
+    );
+  }
 
-          <ChangeMetadata item={item} />
-
-          <EvidenceList
-            references={item.sourceReferences}
-          />
-        </>
-      ) : editing ? (
+  if (editing) {
+    return (
+      <div className="p-4 sm:p-5">
         <div className="space-y-5">
           <div>
             <label className="text-sm font-medium">
@@ -209,7 +214,7 @@ export function ScopeItemCard({
                 setTitle(event.target.value)
               }
               disabled={saving}
-              className="mt-2 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              className="mt-2 h-9 w-full rounded-lg border border-input bg-background px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25"
             />
           </div>
 
@@ -224,7 +229,7 @@ export function ScopeItemCard({
                 setDescription(event.target.value)
               }
               disabled={saving}
-              className="mt-2 min-h-20 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              className="mt-2 min-h-20 w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm leading-relaxed shadow-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25"
             />
           </div>
 
@@ -246,7 +251,7 @@ export function ScopeItemCard({
             </p>
           )}
 
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button
               type="button"
               variant="outline"
@@ -260,23 +265,32 @@ export function ScopeItemCard({
             <Button
               type="button"
               onClick={handleSave}
-              disabled={saving}
+              disabled={
+                saving || !title.trim()
+              }
             >
               <Check />
-              {saving ? "Saving..." : "Save amendment"}
+              {saving
+                ? "Saving..."
+                : "Save amendment"}
             </Button>
           </div>
         </div>
-      ) : removing ? (
+      </div>
+    );
+  }
+
+  if (removing) {
+    return (
+      <div className="bg-destructive/5 p-4 sm:p-5">
         <div className="space-y-5">
           <div>
-            <p className="font-medium">
-              Remove "{item.title}"?
+            <p className="text-sm font-semibold">
+              Remove this item?
             </p>
 
-            <p className="mt-1 text-sm text-muted-foreground">
-              The item will remain in the version history
-              as a tombstone.
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+              The item will remain in this version's history.
             </p>
           </div>
 
@@ -298,7 +312,7 @@ export function ScopeItemCard({
             </p>
           )}
 
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button
               type="button"
               variant="outline"
@@ -322,55 +336,59 @@ export function ScopeItemCard({
             </Button>
           </div>
         </div>
-      ) : (
-        <>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="font-medium">
-                {item.title}
-              </p>
+      </div>
+    );
+  }
 
-              {item.description && (
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {item.description}
-                </p>
-              )}
+  return (
+    <div className="px-4 py-3.5 sm:px-5">
+      <div className="flex items-start gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">
+            {item.title}
+          </p>
 
-              <ChangeMetadata item={item} />
-            </div>
+          {item.description && (
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              {item.description}
+            </p>
+          )}
 
-            {editable && (
-              <div className="flex shrink-0 gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={startEditing}
-                  disabled={saving}
-                >
-                  <Pencil />
-                  Edit
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={startRemoving}
-                  disabled={saving}
-                >
-                  <Trash2 />
-                  Remove
-                </Button>
-              </div>
-            )}
-          </div>
+          <ChangeMetadata item={item} />
 
           <EvidenceList
             references={item.sourceReferences}
           />
-        </>
-      )}
+        </div>
+
+        {editable && (
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={startEditing}
+              disabled={saving}
+              aria-label={`Edit ${item.title}`}
+              title="Edit"
+            >
+              <Pencil />
+            </Button>
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={startRemoving}
+              disabled={saving}
+              aria-label={`Remove ${item.title}`}
+              title="Remove"
+            >
+              <Trash2 />
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
