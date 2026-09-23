@@ -8,6 +8,7 @@
 // Member       = connects users to organizations.
 // Client       = a client belonging to an organization.
 // Project      = a project belonging to an organization and client.
+// ClientRequest = a client request evaluated against a specific approved scope version.
 
 generator client {
   provider = "prisma-client"
@@ -36,7 +37,7 @@ model User {
   members  Member[]
 
   revisionReviewDecisions  RevisionReviewDecision[]
-  finalizedRevisionReviews RevisionReview[] @relation("RevisionReviewFinalizedBy")
+  finalizedRevisionReviews RevisionReview[]         @relation("RevisionReviewFinalizedBy")
 
   @@map("user")
 }
@@ -211,6 +212,7 @@ model Project {
 
   scopeBaselines          ScopeBaseline[]
   scopeRevisionCandidates ScopeRevisionCandidate[]
+  clientRequests          ClientRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -237,6 +239,9 @@ model ScopeBaseline {
 
   revisionCandidates ScopeRevisionCandidate[] @relation("ScopeBaselineRevisionCandidates")
 
+  // Requests evaluated against this exact baseline.
+  clientRequests ClientRequest[] @relation("ClientRequestAnalyzedAgainstBaseline")
+
   // Baseline versions start at 1 and increase whenever the scope is formally
   // revised. The database constraint prevents duplicate versions per project.
   version Int @default(1)
@@ -260,6 +265,7 @@ model ScopeBaseline {
   //   deliverables: [],
   //   features: [],
   //   exclusions: [],
+  //   clientResponsibilities: [],
   //   revisionLimits: [],
   //   timeline: {},
   //   assumptions: []
@@ -273,6 +279,44 @@ model ScopeBaseline {
 
   @@unique([projectId, version])
   @@index([projectId])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Client Request
+//
+// A ClientRequest is an immutable capture of a client's request.
+//
+// IMPORTANT:
+// analyzedAgainstBaselineId pins the exact approved scope version used for
+// evaluation. Future scope versions must never silently change history.
+// -----------------------------------------------------------------------------
+
+model ClientRequest {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Exact approved scope baseline used when this request was captured for
+  // analysis. Restrict prevents accidental deletion of a referenced baseline.
+  analyzedAgainstBaselineId String
+  analyzedAgainstBaseline   ScopeBaseline @relation("ClientRequestAnalyzedAgainstBaseline", fields: [analyzedAgainstBaselineId], references: [id], onDelete: Restrict)
+
+  // Preserve the original request wording exactly as captured.
+  originalText String @db.Text
+
+  // NEW       = captured, analysis not yet run
+  // ANALYZED  = decision engine has produced an analysis
+  // REVIEW    = human review required
+  // RESOLVED  = request has been resolved
+  status String @default("NEW")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, createdAt])
+  @@index([analyzedAgainstBaselineId])
+  @@index([status])
 }
 
 // -----------------------------------------------------------------------------
@@ -338,7 +382,7 @@ model RevisionReview {
   id String @id @default(cuid())
 
   // One review workspace per revision candidate.
-  candidateId String @unique
+  candidateId String                 @unique
   candidate   ScopeRevisionCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
 
   // IN_PROGRESS = reviewer can still make decisions.
@@ -352,7 +396,7 @@ model RevisionReview {
 
   // Reviewer who completed the finalization.
   finalizedById String?
-  finalizedBy   User? @relation("RevisionReviewFinalizedBy", fields: [finalizedById], references: [id], onDelete: Restrict)
+  finalizedBy   User?   @relation("RevisionReviewFinalizedBy", fields: [finalizedById], references: [id], onDelete: Restrict)
 
   // Full decision history for this review.
   decisions RevisionReviewDecision[]
@@ -395,7 +439,7 @@ model RevisionReviewDecision {
 
   // Authenticated user who made this decision.
   actorId String
-  actor   User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  actor   User   @relation(fields: [actorId], references: [id], onDelete: Restrict)
 
   // Immutable audit timestamp.
   createdAt DateTime @default(now())

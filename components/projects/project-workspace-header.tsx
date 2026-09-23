@@ -33,19 +33,19 @@ export function ProjectWorkspaceHeader({
   showRequestAction = true,
 }: ProjectWorkspaceHeaderProps) {
   return (
-    <header className="border-b border-border/70 pb-4">
+    <header className="shrink-0 border-b border-border/70 pb-3">
       <Link
         href="/projects"
-        className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="size-3.5" />
         Projects
       </Link>
 
-      <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+     <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-            <h1 className="min-w-0 break-words text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h1 className="min-w-0 break-words text-xl font-semibold tracking-[-0.03em] sm:text-2xl">
               {projectName}
             </h1>
 
@@ -56,19 +56,13 @@ export function ProjectWorkspaceHeader({
             )}
           </div>
 
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          <div className="mt-1 flex flex-wrap items-center gap-x-2.5 text-xs text-muted-foreground">
             <span>{clientName}</span>
 
             <span className="text-border">•</span>
 
             <span>
-              <span className="mr-1 text-xs uppercase tracking-wide text-muted-foreground/80">
-                Value
-              </span>
-
-              <span className="font-medium text-foreground">
-                {formatCurrency(value)}
-              </span>
+              {formatCurrency(value)}
             </span>
           </div>
         </div>
@@ -76,7 +70,7 @@ export function ProjectWorkspaceHeader({
         {showRequestAction && (
           <Button
             size="sm"
-            className="w-full lg:w-auto"
+           className="w-full sm:w-auto"
             nativeButton={false}
             render={
               <Link
@@ -84,7 +78,7 @@ export function ProjectWorkspaceHeader({
               />
             }
           >
-            <Plus className="size-4" />
+            <Plus className="size-3.5" />
             New Client Request
           </Button>
         )}

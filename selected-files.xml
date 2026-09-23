@@ -1,0 +1,4110 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+app/
+  (dashboard)/
+    projects/
+      [projectId]/
+        requests/
+          new/
+            page.tsx
+          page.tsx
+        actions.ts
+        page.tsx
+components/
+  projects/
+    request/
+      request-analysis-panel.tsx
+      request-card.tsx
+      request-form.tsx
+      request-status-badge.tsx
+    project-workspace-header.tsx
+    project-workspace-nav.tsx
+lib/
+  auth-session.ts
+  organization-access.ts
+  projects.ts
+  scope-schema.ts
+  scope.ts
+prisma/
+  schema.prisma
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="components/projects/request/request-analysis-panel.tsx">
+import {
+  CircleHelp,
+  Clock3,
+  FileSearch,
+  GitCompareArrows,
+  ShieldCheck,
+} from "lucide-react";
+import type { ComponentType } from "react";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+type RequestAnalysisPanelProps = {
+  hasScopeBaseline: boolean;
+};
+
+export function RequestAnalysisPanel({
+  hasScopeBaseline,
+}: RequestAnalysisPanelProps) {
+  return (
+    <Card>
+      <CardHeader className="border-b px-5 py-4">
+        <div className="flex items-center gap-2">
+          <FileSearch className="size-4 text-muted-foreground" />
+          <CardTitle>How this request will be evaluated</CardTitle>
+        </div>
+      </CardHeader>
+
+      <CardContent className="p-5">
+        <div className="space-y-4">
+          <AnalysisStep
+            icon={GitCompareArrows}
+            title="Compare with approved scope"
+            description="Check whether the requested work is already covered by the project's agreed scope."
+            state={hasScopeBaseline ? "ready" : "blocked"}
+          />
+
+          <AnalysisStep
+            icon={ShieldCheck}
+            title="Identify affected scope"
+            description="Connect the request to the specific scope items, exclusions, assumptions, or limits it touches."
+            state={hasScopeBaseline ? "ready" : "blocked"}
+          />
+
+          <AnalysisStep
+            icon={Clock3}
+            title="Estimate effort and commercial impact"
+            description="Estimate additional work, internal cost, timeline impact, and the resulting margin effect."
+            state="upcoming"
+          />
+
+          <AnalysisStep
+            icon={CircleHelp}
+            title="Recommend the next action"
+            description="Surface an evidence-backed recommendation such as absorb, charge, swap, or defer."
+            state="upcoming"
+          />
+        </div>
+
+        {!hasScopeBaseline && (
+          <div className="mt-5 rounded-lg border border-warning/15 bg-warning/5 p-3.5">
+            <p className="text-sm font-medium">
+              A scope baseline is required before analysis.
+            </p>
+
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Define and approve the project scope first so this request has a
+              trusted reference point.
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AnalysisStep({
+  icon: Icon,
+  title,
+  description,
+  state,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
+  state: "ready" | "blocked" | "upcoming";
+}) {
+  const iconClassName =
+    state === "ready"
+      ? "bg-success/10 text-success"
+      : state === "blocked"
+        ? "bg-warning/10 text-warning"
+        : "bg-muted text-muted-foreground";
+
+  return (
+    <div className="flex items-start gap-3">
+      <div
+        className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${iconClassName}`}
+      >
+        <Icon className="size-4" />
+      </div>
+
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{title}</p>
+
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          {description}
+        </p>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="components/projects/request/request-card.tsx">
+import Link from "next/link";
+import { ArrowUpRight, MessageSquare } from "lucide-react";
+
+import { RequestStatusBadge } from "./request-status-badge";
+import type { RequestStatus } from "./request-status-badge";
+
+type RequestCardProps = {
+  projectId: string;
+  requestId: string;
+  title: string;
+  preview: string;
+  status: RequestStatus;
+  createdLabel: string;
+};
+
+export function RequestCard({
+  projectId,
+  requestId,
+  title,
+  preview,
+  status,
+  createdLabel,
+}: RequestCardProps) {
+  return (
+    <Link
+      href={`/projects/${projectId}/requests/${requestId}`}
+      className="group block rounded-xl border border-border bg-background p-4 transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-sm"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+            <MessageSquare className="size-4 text-muted-foreground" />
+          </div>
+
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="truncate text-sm font-semibold">{title}</h3>
+              <RequestStatusBadge status={status} />
+            </div>
+
+            <p className="mt-1.5 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
+              {preview}
+            </p>
+
+            <p className="mt-3 text-xs text-muted-foreground">
+              {createdLabel}
+            </p>
+          </div>
+        </div>
+
+        <ArrowUpRight className="size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-foreground" />
+      </div>
+    </Link>
+  );
+}
+</file>
+
+<file path="components/projects/request/request-form.tsx">
+"use client";
+
+import { useState } from "react";
+import type { FormEvent } from "react";
+import { ArrowRight, Check, MessageSquare, Sparkles } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+
+type RequestFormProps = {
+  hasScopeBaseline: boolean;
+};
+
+export function RequestForm({
+  hasScopeBaseline,
+}: RequestFormProps) {
+  const [request, setRequest] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const trimmed = request.trim();
+
+    if (!trimmed) {
+      return;
+    }
+
+    // UI-only for now. Persistence and AI analysis come with ClientRequest.
+    setSubmitted(true);
+  }
+
+  return (
+    <Card>
+      <CardHeader className="border-b px-5 py-4 sm:px-6">
+        <div className="flex items-start gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+            <MessageSquare className="size-4 text-muted-foreground" />
+          </div>
+
+          <div>
+            <CardTitle>Client request</CardTitle>
+
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+              Capture the client's wording exactly as you received it.
+            </p>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className="p-5 sm:p-6">
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="space-y-2">
+            <Label htmlFor="request">Request details</Label>
+
+            <textarea
+              id="request"
+              value={request}
+              onChange={(event) => {
+                setRequest(event.target.value);
+                setSubmitted(false);
+              }}
+              placeholder="Example: Can you also add downloadable monthly reports to the dashboard?"
+              className="min-h-64 w-full resize-y rounded-lg border border-input bg-background px-3.5 py-3 text-sm leading-relaxed text-foreground shadow-sm outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/25"
+            />
+
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Keep the original wording. Context can be added when it is
+              important to understanding the request.
+            </p>
+          </div>
+
+          {submitted && (
+            <div className="rounded-lg border border-success/15 bg-success/5 p-3.5">
+              <div className="flex items-start gap-2.5">
+                <Check className="mt-0.5 size-4 shrink-0 text-success" />
+
+                <div>
+                  <p className="text-sm font-medium">
+                    Request captured for the next analysis step.
+                  </p>
+
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Persistence and AI analysis will be connected when the
+                    request engine is implemented.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 border-t pt-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Sparkles className="size-3.5 text-ai" />
+
+              <span>
+                {!hasScopeBaseline
+                  ? "Define scope before analysis."
+                  : "Ready for scope comparison once analysis is connected."}
+              </span>
+            </div>
+
+            <Button
+              type="submit"
+              disabled={!request.trim() || !hasScopeBaseline}
+              className="w-full sm:w-auto"
+            >
+              {submitted ? "Captured" : "Capture request"}
+
+              {submitted ? <Check /> : <ArrowRight />}
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+</file>
+
+<file path="components/projects/request/request-status-badge.tsx">
+import { Badge } from "@/components/ui/badge";
+
+export type RequestStatus =
+  | "NEW"
+  | "ANALYZED"
+  | "REVIEW"
+  | "RESOLVED";
+
+const statusConfig: Record<
+  RequestStatus,
+  {
+    label: string;
+    variant:
+      | "outline"
+      | "secondary"
+      | "warning"
+      | "success"
+      | "ai";
+  }
+> = {
+  NEW: {
+    label: "New",
+    variant: "outline",
+  },
+  ANALYZED: {
+    label: "Analyzed",
+    variant: "ai",
+  },
+  REVIEW: {
+    label: "Needs review",
+    variant: "warning",
+  },
+  RESOLVED: {
+    label: "Resolved",
+    variant: "success",
+  },
+};
+
+export function RequestStatusBadge({
+  status,
+}: {
+  status: RequestStatus;
+}) {
+  const config = statusConfig[status];
+
+  return <Badge variant={config.variant}>{config.label}</Badge>;
+}
+</file>
+
+<file path="app/(dashboard)/projects/[projectId]/requests/new/page.tsx">
+import Link from "next/link";
+import { ArrowLeft, Sparkles } from "lucide-react";
+
+import { getProject } from "@/lib/projects";
+
+import { ProjectWorkspaceHeader } from "@/components/projects/project-workspace-header";
+import { ProjectWorkspaceNav } from "@/components/projects/project-workspace-nav";
+import { RequestAnalysisPanel } from "@/components/projects/request/request-analysis-panel";
+import { RequestForm } from "@/components/projects/request/request-form";
+
+interface NewRequestPageProps {
+  params: Promise<{
+    projectId: string;
+  }>;
+}
+
+export default async function NewRequestPage({
+  params,
+}: NewRequestPageProps) {
+  const { projectId } = await params;
+
+  const project = await getProject(projectId);
+
+  if (!project) {
+    return (
+      <div className="px-5 py-8 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-7xl">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Project not found
+          </h1>
+
+          <Link
+            href="/projects"
+            className="mt-4 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" />
+            Projects
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const baseline = project.scopeBaselines[0];
+  const hasApprovedScope = baseline?.status === "APPROVED";
+
+  return (
+    <div className="min-h-full">
+      <div className="mx-auto max-w-7xl px-5 py-6 sm:px-6 lg:px-8 lg:py-7">
+        <ProjectWorkspaceHeader
+          projectId={project.id}
+          projectName={project.name}
+          clientName={project.client.name}
+          value={project.value}
+          status="Active"
+          showRequestAction={false}
+        />
+
+        <ProjectWorkspaceNav projectId={project.id} />
+
+        <div className="mt-7">
+          <Link
+            href={`/projects/${project.id}/requests`}
+            className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ArrowLeft className="size-3.5" />
+            Client requests
+          </Link>
+
+          <div className="mt-4 max-w-3xl">
+            <div className="flex items-center gap-2 text-ai">
+              <Sparkles className="size-4" />
+
+              <span className="text-xs font-semibold uppercase tracking-[0.08em]">
+                New client request
+              </span>
+            </div>
+
+            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">
+              Capture the client&apos;s request
+            </h2>
+
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground sm:text-base">
+              Paste the request exactly as you received it. Scope Copilot will
+              use the approved project scope as the reference for evaluating
+              what changed.
+            </p>
+          </div>
+
+          <div className="mt-7 grid gap-5 lg:grid-cols-[minmax(0,1.75fr)_minmax(280px,0.85fr)]">
+            <RequestForm hasScopeBaseline={hasApprovedScope} />
+
+            <RequestAnalysisPanel hasScopeBaseline={hasApprovedScope} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="app/(dashboard)/projects/[projectId]/requests/page.tsx">
+import Link from "next/link";
+import { ArrowUpRight, Inbox, Plus } from "lucide-react";
+
+import { getProject } from "@/lib/projects";
+
+import { ProjectWorkspaceHeader } from "@/components/projects/project-workspace-header";
+import { ProjectWorkspaceNav } from "@/components/projects/project-workspace-nav";
+
+import { Card, CardContent } from "@/components/ui/card";
+
+interface RequestsPageProps {
+  params: Promise<{
+    projectId: string;
+  }>;
+}
+
+export default async function RequestsPage({
+  params,
+}: RequestsPageProps) {
+  const { projectId } = await params;
+
+  const project = await getProject(projectId);
+
+  if (!project) {
+    return (
+      <div className="px-5 py-8 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-7xl">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Project not found
+          </h1>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-full">
+      <div className="mx-auto max-w-7xl px-5 py-7 sm:px-6 lg:px-8 lg:py-8">
+        <ProjectWorkspaceHeader
+          projectId={project.id}
+          projectName={project.name}
+          clientName={project.client.name}
+          value={project.value}
+          status="Active"
+        />
+
+        <ProjectWorkspaceNav projectId={project.id} />
+
+        <div className="mt-7">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                Requests
+              </p>
+
+              <h2 className="mt-1 text-2xl font-semibold tracking-tight">
+                Client requests
+              </h2>
+
+              <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                Review new client requests against the project&apos;s approved
+                scope before committing to the work.
+              </p>
+            </div>
+
+            <Link
+              href={`/projects/${project.id}/requests/new`}
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+            >
+              <Plus className="size-4" />
+              New Client Request
+            </Link>
+          </div>
+
+          <Card className="mt-7">
+            <CardContent className="flex min-h-80 flex-col items-center justify-center px-6 py-12 text-center">
+              <div className="flex size-11 items-center justify-center rounded-xl border bg-muted">
+                <Inbox className="size-5 text-muted-foreground" />
+              </div>
+
+              <h3 className="mt-4 text-sm font-semibold">
+                No client requests yet
+              </h3>
+
+              <p className="mt-1 max-w-md text-sm leading-relaxed text-muted-foreground">
+                When a client asks for something new, you&apos;ll be able to
+                analyze it here against the approved project scope.
+              </p>
+
+              <Link
+                href={`/projects/${project.id}/requests/new`}
+                className="mt-5 inline-flex items-center gap-1 text-sm font-medium text-foreground hover:underline"
+              >
+                Start a client request
+                <ArrowUpRight className="size-3.5" />
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="components/projects/project-workspace-header.tsx">
+import Link from "next/link";
+import { ArrowLeft, Plus } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+
+type ProjectWorkspaceHeaderProps = {
+  projectId: string;
+  projectName: string;
+  clientName: string;
+  value: unknown;
+  status?: string | null;
+  showRequestAction?: boolean;
+};
+
+function formatCurrency(value: unknown) {
+  const amount = Number(value);
+
+  if (!Number.isFinite(amount)) {
+    return "$0";
+  }
+
+  return `$${amount.toLocaleString("en-US", {
+    maximumFractionDigits: 0,
+  })}`;
+}
+
+export function ProjectWorkspaceHeader({
+  projectId,
+  projectName,
+  clientName,
+  value,
+  status,
+  showRequestAction = true,
+}: ProjectWorkspaceHeaderProps) {
+  return (
+    <header className="shrink-0 border-b border-border/70 pb-3">
+      <Link
+        href="/projects"
+        className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ArrowLeft className="size-3.5" />
+        Projects
+      </Link>
+
+     <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h1 className="min-w-0 break-words text-xl font-semibold tracking-[-0.03em] sm:text-2xl">
+              {projectName}
+            </h1>
+
+            {status && (
+              <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                {status}
+              </span>
+            )}
+          </div>
+
+          <div className="mt-1 flex flex-wrap items-center gap-x-2.5 text-xs text-muted-foreground">
+            <span>{clientName}</span>
+
+            <span className="text-border">•</span>
+
+            <span>
+              {formatCurrency(value)}
+            </span>
+          </div>
+        </div>
+
+        {showRequestAction && (
+          <Button
+            size="sm"
+           className="w-full sm:w-auto"
+            nativeButton={false}
+            render={
+              <Link
+                href={`/projects/${projectId}/requests/new`}
+              />
+            }
+          >
+            <Plus className="size-3.5" />
+            New Client Request
+          </Button>
+        )}
+      </div>
+    </header>
+  );
+}
+</file>
+
+<file path="components/projects/project-workspace-nav.tsx">
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+import { cn } from "cn";
+
+type ProjectWorkspaceNavProps = {
+  projectId: string;
+};
+
+function getNavigation(projectId: string) {
+  const basePath = `/projects/${projectId}`;
+
+  return [
+    {
+      label: "Overview",
+      href: basePath,
+      exact: true,
+    },
+    {
+      label: "Scope",
+      href: `${basePath}/scope`,
+      exact: false,
+    },
+    {
+      label: "Requests",
+      href: `${basePath}/requests`,
+      exact: false,
+    },
+    {
+      label: "History",
+      href: `${basePath}/history`,
+      exact: false,
+    },
+  ] as const;
+}
+
+export function ProjectWorkspaceNav({
+  projectId,
+}: ProjectWorkspaceNavProps) {
+  const pathname = usePathname();
+  const navigation = getNavigation(projectId);
+
+  return (
+    <nav
+      aria-label="Project navigation"
+      className="mt-5 overflow-x-auto border-b border-border"
+    >
+      <div className="flex min-w-max gap-1">
+        {navigation.map((item) => {
+          const active = item.exact
+            ? pathname === item.href
+            : pathname === item.href ||
+              pathname.startsWith(
+                `${item.href}/`,
+              );
+
+          return (
+            <Link
+              key={item.label}
+              href={item.href}
+              aria-current={
+                active ? "page" : undefined
+              }
+              className={cn(
+                "relative px-3 py-2.5 text-sm font-medium transition-colors",
+                "after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary after:transition-opacity",
+                active
+                  ? "text-foreground after:opacity-100"
+                  : "text-muted-foreground after:opacity-0 hover:text-foreground",
+              )}
+            >
+              {item.label}
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+</file>
+
+<file path="lib/auth-session.ts">
+import { headers } from "next/headers";
+
+import { auth } from "@/lib/auth";
+import { requireActiveOrganizationId } from "@/lib/organization";
+
+export async function getCurrentOrganizationId() {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+
+  if (!session) {
+    throw new Error("Unauthorized");
+  }
+
+  return requireActiveOrganizationId(
+    session.session.activeOrganizationId,
+  );
+}
+</file>
+
+<file path="lib/organization-access.ts">
+import { headers } from "next/headers";
+
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+
+export async function getCurrentSession() {
+  return auth.api.getSession({
+    headers: await headers(),
+  });
+}
+
+export async function getPendingInvitation(email: string) {
+  return prisma.invitation.findFirst({
+    where: {
+      email: {
+        equals: email,
+        mode: "insensitive",
+      },
+      status: "pending",
+      expiresAt: {
+        gt: new Date(),
+      },
+    },
+    include: {
+      organization: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+}
+</file>
+
+<file path="lib/scope-schema.ts">
+import { z } from "zod";
+
+const sourceReferenceSchema = z.object({
+  quote: z.string().min(1),
+  section: z.string().optional(),
+});
+
+/* -------------------------------------------------------------------------- */
+/* Extraction contract                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Gemini only extracts facts from the supplied SOW.
+ *
+ * It does not know about persistent IDs, amendments, or version lifecycle.
+ */
+const extractedScopeItemSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  sourceReferences: z.array(sourceReferenceSchema),
+});
+
+const extractedRevisionLimitSchema = z.object({
+  type: z.string().min(1),
+  limit: z.string().min(1),
+  sourceReferences: z.array(sourceReferenceSchema),
+});
+
+const extractedTimelineSchema = z.object({
+  duration: z.string().optional(),
+  startCondition: z.string().optional(),
+  dependencies: z.array(z.string()),
+  sourceReferences: z.array(sourceReferenceSchema),
+});
+
+const extractedAssumptionSchema = z.object({
+  statement: z.string().min(1),
+  sourceReferences: z.array(sourceReferenceSchema),
+});
+
+export const extractedScopeSchema = z.object({
+  deliverables: z.array(extractedScopeItemSchema),
+  features: z.array(extractedScopeItemSchema),
+  exclusions: z.array(extractedScopeItemSchema),
+  clientResponsibilities: z.array(extractedScopeItemSchema),
+  revisionLimits: z.array(extractedRevisionLimitSchema),
+  timeline: extractedTimelineSchema,
+  assumptions: z.array(extractedAssumptionSchema),
+});
+
+export type ExtractedScope = z.infer<
+  typeof extractedScopeSchema
+>;
+
+/* -------------------------------------------------------------------------- */
+/* Persisted scope contract                                                   */
+/* -------------------------------------------------------------------------- */
+
+const documentExtractionProvenanceSchema = z
+  .object({
+    type: z.literal("document_extraction"),
+  })
+  .strict();
+
+const manualAmendmentProvenanceSchema = z
+  .object({
+    type: z.literal("manual_amendment"),
+    rationale: z.string().trim().min(1),
+    referenceId: z.string().trim().min(1),
+  })
+  .strict();
+
+const provenanceSchema = z.discriminatedUnion("type", [
+  documentExtractionProvenanceSchema,
+  manualAmendmentProvenanceSchema,
+]);
+
+const amendmentSchema = z
+  .object({
+    rationale: z.string().trim().min(1),
+    referenceId: z.string().trim().min(1),
+  })
+  .strict();
+
+const removalSchema = z
+  .object({
+    rationale: z.string().trim().min(1),
+    referenceId: z.string().trim().min(1),
+  })
+  .strict();
+
+const persistedScopeItemBaseSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().optional(),
+
+  sourceReferences: z.array(sourceReferenceSchema),
+
+  provenance: provenanceSchema,
+
+  status: z.enum(["active", "removed"]),
+
+  amendment: amendmentSchema.optional(),
+
+  removal: removalSchema.optional(),
+});
+
+const persistedScopeItemSchema =
+  persistedScopeItemBaseSchema.superRefine(
+    (item, context) => {
+      if (
+        item.provenance.type ===
+          "document_extraction" &&
+        item.sourceReferences.length === 0
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sourceReferences"],
+          message:
+            "Document-extracted items must contain at least one source reference.",
+        });
+      }
+
+      if (
+        item.provenance.type ===
+          "manual_amendment" &&
+        item.sourceReferences.length > 0
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sourceReferences"],
+          message:
+            "Manual amendments cannot contain document source references.",
+        });
+      }
+
+      // A manually added item stores its rationale/reference directly
+      // inside provenance. A second amendment record would duplicate that
+      // same meaning.
+      if (
+        item.provenance.type ===
+          "manual_amendment" &&
+        item.amendment
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["amendment"],
+          message:
+            "Manual amendments cannot also contain amendment metadata.",
+        });
+      }
+
+      if (
+        item.status === "removed" &&
+        !item.removal
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["removal"],
+          message:
+            "Removed items must contain removal metadata.",
+        });
+      }
+
+      if (
+        item.status === "active" &&
+        item.removal
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["removal"],
+          message:
+            "Active items cannot contain removal metadata.",
+        });
+      }
+    },
+  );
+
+const persistedRevisionLimitSchema =
+  z
+    .object({
+      id: z.string().min(1),
+      type: z.string().min(1),
+      limit: z.string().min(1),
+
+      sourceReferences: z.array(
+        sourceReferenceSchema,
+      ),
+
+      provenance: provenanceSchema,
+
+      status: z.enum(["active", "removed"]),
+
+      amendment: amendmentSchema.optional(),
+
+      removal: removalSchema.optional(),
+    })
+    .superRefine((item, context) => {
+      if (
+        item.provenance.type ===
+          "document_extraction" &&
+        item.sourceReferences.length === 0
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sourceReferences"],
+          message:
+            "Document-extracted revision limits must contain at least one source reference.",
+        });
+      }
+
+      if (
+        item.provenance.type ===
+          "manual_amendment" &&
+        item.sourceReferences.length > 0
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sourceReferences"],
+          message:
+            "Manual revision-limit amendments cannot contain document source references.",
+        });
+      }
+
+      if (
+        item.provenance.type ===
+          "manual_amendment" &&
+        item.amendment
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["amendment"],
+          message:
+            "Manual amendments cannot also contain amendment metadata.",
+        });
+      }
+
+      if (
+        item.status === "removed" &&
+        !item.removal
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["removal"],
+          message:
+            "Removed revision limits must contain removal metadata.",
+        });
+      }
+
+      if (
+        item.status === "active" &&
+        item.removal
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["removal"],
+          message:
+            "Active revision limits cannot contain removal metadata.",
+        });
+      }
+    });
+
+const persistedAssumptionSchema = z
+  .object({
+    id: z.string().min(1),
+
+    statement: z.string().min(1),
+
+    sourceReferences: z.array(
+      sourceReferenceSchema,
+    ),
+
+    provenance: provenanceSchema,
+
+    status: z.enum([
+      "active",
+      "removed",
+    ]),
+
+    amendment: amendmentSchema.optional(),
+
+    removal: removalSchema.optional(),
+  })
+  .superRefine((item, context) => {
+    if (
+      item.provenance.type ===
+        "document_extraction" &&
+      item.sourceReferences.length === 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sourceReferences"],
+        message:
+          "Document-extracted assumptions must contain at least one source reference.",
+      });
+    }
+
+    if (
+      item.provenance.type ===
+        "manual_amendment" &&
+      item.sourceReferences.length > 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sourceReferences"],
+        message:
+          "Manual assumption amendments cannot contain document source references.",
+      });
+    }
+
+    if (
+      item.provenance.type ===
+        "manual_amendment" &&
+      item.amendment
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["amendment"],
+        message:
+          "Manual amendments cannot also contain amendment metadata.",
+      });
+    }
+
+    if (
+      item.status === "removed" &&
+      !item.removal
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["removal"],
+        message:
+          "Removed assumptions must contain removal metadata.",
+      });
+    }
+
+    if (
+      item.status === "active" &&
+      item.removal
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["removal"],
+        message:
+          "Active assumptions cannot contain removal metadata.",
+      });
+    }
+  });
+
+/* -------------------------------------------------------------------------- */
+/* Timeline                                                                   */
+/* -------------------------------------------------------------------------- */
+
+const persistedTimelineSchema = z
+  .object({
+    duration: z.string().optional(),
+    startCondition: z.string().optional(),
+    dependencies: z.array(z.string()),
+    sourceReferences: z.array(
+      sourceReferenceSchema,
+    ),
+
+    provenance: provenanceSchema.optional(),
+
+    amendment: amendmentSchema.optional(),
+  })
+  .superRefine((timeline, context) => {
+    const hasContent =
+      Boolean(timeline.duration?.trim()) ||
+      Boolean(
+        timeline.startCondition?.trim(),
+      ) ||
+      timeline.dependencies.length > 0 ||
+      timeline.sourceReferences.length > 0 ||
+      Boolean(timeline.provenance) ||
+      Boolean(timeline.amendment);
+
+    // Empty timeline is a valid extraction state.
+    if (!hasContent) {
+      return;
+    }
+
+    if (!timeline.provenance) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["provenance"],
+        message:
+          "Timeline content must declare provenance.",
+      });
+
+      return;
+    }
+
+    if (
+      timeline.provenance.type ===
+        "document_extraction" &&
+      timeline.sourceReferences.length === 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sourceReferences"],
+        message:
+          "Document-extracted timeline content must contain source evidence.",
+      });
+    }
+
+    if (
+      timeline.provenance.type ===
+        "manual_amendment" &&
+      timeline.sourceReferences.length > 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sourceReferences"],
+        message:
+          "Manual timeline amendments cannot contain document source references.",
+      });
+    }
+
+    if (
+      timeline.provenance.type ===
+        "manual_amendment" &&
+      timeline.amendment
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["amendment"],
+        message:
+          "Manual timeline amendments cannot also contain amendment metadata.",
+      });
+    }
+  });
+
+/* -------------------------------------------------------------------------- */
+/* Canonical persisted scope                                                   */
+/* -------------------------------------------------------------------------- */
+
+export const normalizedScopeSchema = z
+  .object({
+    deliverables: z.array(
+      persistedScopeItemSchema,
+    ),
+
+    features: z.array(
+      persistedScopeItemSchema,
+    ),
+
+    exclusions: z.array(
+      persistedScopeItemSchema,
+    ),
+
+    clientResponsibilities: z.array(
+      persistedScopeItemSchema,
+    ),
+
+    revisionLimits: z.array(
+      persistedRevisionLimitSchema,
+    ),
+
+    timeline: persistedTimelineSchema,
+
+    assumptions: z.array(
+      persistedAssumptionSchema,
+    ),
+  })
+  .superRefine((scope, context) => {
+    // IDs identify logical scope items. One ID must never represent
+    // two different items or two different scope categories.
+    const seenIds = new Map<string, string>();
+
+    const sections = [
+      ["deliverables", scope.deliverables],
+      ["features", scope.features],
+      ["exclusions", scope.exclusions],
+      [
+        "clientResponsibilities",
+        scope.clientResponsibilities,
+      ],
+      ["revisionLimits", scope.revisionLimits],
+      ["assumptions", scope.assumptions],
+    ] as const;
+
+    for (const [section, items] of sections) {
+      items.forEach((item, index) => {
+        const previousSection =
+          seenIds.get(item.id);
+
+        if (previousSection) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [section, index, "id"],
+            message:
+              `Item ID "${item.id}" is already used in ${previousSection}.`,
+          });
+
+          return;
+        }
+
+        seenIds.set(item.id, section);
+      });
+    }
+  });
+
+export type NormalizedScope = z.infer<
+  typeof normalizedScopeSchema
+>;
+
+/* -------------------------------------------------------------------------- */
+/* Legacy persisted-data compatibility                                        */
+/* -------------------------------------------------------------------------- */
+
+function stableHash(
+  value: string,
+  seed: number,
+): string {
+  let hash = seed >>> 0;
+
+  for (
+    let index = 0;
+    index < value.length;
+    index += 1
+  ) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0)
+    .toString(16)
+    .padStart(8, "0");
+}
+
+function createLegacyItemId(
+  category: string,
+  item: Record<string, unknown>,
+): string {
+  // Include category so identical evidence used in different old categories
+  // does not accidentally create the same logical item ID.
+  const fingerprint = JSON.stringify({
+    category,
+    title: item.title,
+    description: item.description,
+    statement: item.statement,
+    type: item.type,
+    limit: item.limit,
+    sourceReferences: item.sourceReferences,
+  });
+
+  return `legacy_${stableHash(
+    fingerprint,
+    2166136261,
+  )}_${stableHash(
+    fingerprint,
+    2246822519,
+  )}`;
+}
+
+function normalizeLegacyItem(
+  value: unknown,
+  category: string,
+): unknown {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return value;
+  }
+
+  const record = {
+    ...(value as Record<string, unknown>),
+  };
+
+  const sourceReferences = Array.isArray(
+    record.sourceReferences,
+  )
+    ? record.sourceReferences
+    : [];
+
+  // Old extracted items had source references but no provenance.
+  if (
+    !record.provenance &&
+    sourceReferences.length > 0
+  ) {
+    record.provenance = {
+      type: "document_extraction",
+    };
+  }
+
+  // Old extracted items were active by definition because removals
+  // did not exist in the previous contract.
+  if (
+    !record.status &&
+    record.provenance
+  ) {
+    record.status = "active";
+  }
+
+  // Backfill a deterministic identity for old document-derived items.
+  if (
+    !record.id &&
+    record.provenance &&
+    typeof record.provenance === "object" &&
+    (record.provenance as Record<string, unknown>)
+      .type === "document_extraction"
+  ) {
+    record.id = createLegacyItemId(
+      category,
+      record,
+    );
+  }
+
+  return record;
+}
+
+function normalizeLegacyTimeline(
+  value: unknown,
+): unknown {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return value;
+  }
+
+  const record = {
+    ...(value as Record<string, unknown>),
+  };
+
+  const sourceReferences = Array.isArray(
+    record.sourceReferences,
+  )
+    ? record.sourceReferences
+    : [];
+
+  if (
+    !record.provenance &&
+    sourceReferences.length > 0
+  ) {
+    record.provenance = {
+      type: "document_extraction",
+    };
+  }
+
+  return record;
+}
+
+/**
+ * Converts old ScopeBaseline JSON into the current persisted contract.
+ *
+ * This is for legacy database records only.
+ * New Gemini output does not pass through this path.
+ */
+export function normalizeLegacyScope(
+  value: unknown,
+): unknown {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    ...record,
+
+    deliverables: Array.isArray(
+      record.deliverables,
+    )
+      ? record.deliverables.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "deliverables",
+          ),
+        )
+      : record.deliverables,
+
+    features: Array.isArray(
+      record.features,
+    )
+      ? record.features.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "features",
+          ),
+        )
+      : record.features,
+
+    exclusions: Array.isArray(
+      record.exclusions,
+    )
+      ? record.exclusions.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "exclusions",
+          ),
+        )
+      : record.exclusions,
+
+    clientResponsibilities:
+      Array.isArray(
+        record.clientResponsibilities,
+      )
+        ? record.clientResponsibilities.map(
+            (item) =>
+              normalizeLegacyItem(
+                item,
+                "clientResponsibilities",
+              ),
+          )
+        : record.clientResponsibilities,
+
+    revisionLimits: Array.isArray(
+      record.revisionLimits,
+    )
+      ? record.revisionLimits.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "revisionLimits",
+          ),
+        )
+      : record.revisionLimits,
+
+    timeline: normalizeLegacyTimeline(
+      record.timeline,
+    ),
+
+    assumptions: Array.isArray(
+      record.assumptions,
+    )
+      ? record.assumptions.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "assumptions",
+          ),
+        )
+      : record.assumptions,
+  };
+}
+
+export function parseStoredScope(
+  value: unknown,
+) {
+  return normalizedScopeSchema.safeParse(
+    normalizeLegacyScope(value),
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Evidence validation                                                        */
+/* -------------------------------------------------------------------------- */
+
+export function validateExtractedScopeSourceReferences(
+  scope: ExtractedScope,
+  sourceText: string,
+): boolean {
+  const quotes: string[] = [];
+
+  const validateReferences = (
+    items: Array<{
+      sourceReferences: Array<{
+        quote: string;
+      }>;
+    }>,
+  ) => {
+    for (const item of items) {
+      if (
+        item.sourceReferences.length === 0
+      ) {
+        console.error(
+          "Extracted item has no source references.",
+        );
+
+        return false;
+      }
+
+      for (const reference of item.sourceReferences) {
+        if (
+          !sourceText.includes(
+            reference.quote,
+          )
+        ) {
+          console.error(
+            "Invalid source reference:",
+            JSON.stringify(reference.quote),
+          );
+
+          return false;
+        }
+
+        quotes.push(reference.quote);
+      }
+    }
+
+    return true;
+  };
+
+  if (
+    !validateReferences(scope.deliverables)
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(scope.features)
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(scope.exclusions)
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(
+      scope.clientResponsibilities,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(
+      scope.revisionLimits,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(scope.assumptions)
+  ) {
+    return false;
+  }
+
+  for (const reference of scope.timeline
+    .sourceReferences) {
+    if (
+      !sourceText.includes(
+        reference.quote,
+      )
+    ) {
+      console.error(
+        "Invalid timeline source reference:",
+        JSON.stringify(reference.quote),
+      );
+
+      return false;
+    }
+
+    quotes.push(reference.quote);
+  }
+
+  if (new Set(quotes).size !== quotes.length) {
+    const duplicates = quotes.filter(
+      (quote, index) =>
+        quotes.indexOf(quote) !== index,
+    );
+
+    console.error(
+      "Duplicate source references:",
+      [...new Set(duplicates)],
+    );
+
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Validate a persisted scope.
+ *
+ * Document-derived items must have real SOW evidence.
+ * Manual amendments intentionally have none.
+ */
+export function validateScopeSourceReferences(
+  scope: NormalizedScope,
+  sourceText: string,
+): boolean {
+  const quotes: string[] = [];
+
+  const validateReferences = (
+    items: Array<{
+      sourceReferences: Array<{
+        quote: string;
+      }>;
+      provenance: {
+        type:
+          | "document_extraction"
+          | "manual_amendment";
+      };
+    }>,
+  ) => {
+    for (const item of items) {
+      if (
+        item.provenance.type ===
+        "manual_amendment"
+      ) {
+        if (
+          item.sourceReferences.length > 0
+        ) {
+          console.error(
+            "Manual amendment contains document source references.",
+          );
+
+          return false;
+        }
+
+        continue;
+      }
+
+      if (
+        item.sourceReferences.length === 0
+      ) {
+        console.error(
+          "Document-extracted item has no source references.",
+        );
+
+        return false;
+      }
+
+      for (const reference of item.sourceReferences) {
+        if (
+          !sourceText.includes(
+            reference.quote,
+          )
+        ) {
+          console.error(
+            "Invalid source reference:",
+            JSON.stringify(reference.quote),
+          );
+
+          return false;
+        }
+
+        quotes.push(reference.quote);
+      }
+    }
+
+    return true;
+  };
+
+  if (
+    !validateReferences(scope.deliverables)
+  ) {
+    return false;
+  }
+
+  if (!validateReferences(scope.features)) {
+    return false;
+  }
+
+  if (!validateReferences(scope.exclusions)) {
+    return false;
+  }
+
+  if (
+    !validateReferences(
+      scope.clientResponsibilities,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(
+      scope.revisionLimits,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(scope.assumptions)
+  ) {
+    return false;
+  }
+
+  if (scope.timeline.provenance) {
+    if (
+      scope.timeline.provenance.type ===
+      "manual_amendment"
+    ) {
+      if (
+        scope.timeline.sourceReferences.length >
+        0
+      ) {
+        console.error(
+          "Manual timeline amendment contains document source references.",
+        );
+
+        return false;
+      }
+    } else {
+      if (
+        scope.timeline.sourceReferences.length ===
+        0
+      ) {
+        console.error(
+          "Document-extracted timeline has no source references.",
+        );
+
+        return false;
+      }
+
+      for (const reference of scope.timeline
+        .sourceReferences) {
+        if (
+          !sourceText.includes(
+            reference.quote,
+          )
+        ) {
+          console.error(
+            "Invalid timeline source reference:",
+            JSON.stringify(reference.quote),
+          );
+
+          return false;
+        }
+
+        quotes.push(reference.quote);
+      }
+    }
+  }
+
+  if (new Set(quotes).size !== quotes.length) {
+    const duplicates = quotes.filter(
+      (quote, index) =>
+        quotes.indexOf(quote) !== index,
+    );
+
+    console.error(
+      "Duplicate source references:",
+      [...new Set(duplicates)],
+    );
+
+    return false;
+  }
+
+  return true;
+}
+</file>
+
+<file path="app/(dashboard)/projects/[projectId]/actions.ts">
+"use server";
+import {
+  createScopeRevisionCandidate,
+} from "@/lib/scope-revision";
+import {
+  addManualScopeItem,
+  amendScopeItem,
+  amendScopeTimeline,
+  approveScopeBaseline,
+  createScopeBaseline,
+  createScopeVersion,
+  removeScopeItem,
+  updateScopeBaseline,
+} from "@/lib/scope";
+
+export async function createScopeBaselineAction(data: {
+  projectId: string;
+  sourceText: string;
+}) {
+  const baseline = await createScopeBaseline(data);
+
+  return {
+    id: baseline.id,
+    version: baseline.version,
+  };
+}
+
+export async function createScopeVersionAction(
+  projectId: string,
+) {
+  const baseline =
+    await createScopeVersion(projectId);
+
+  return {
+    id: baseline.id,
+    version: baseline.version,
+    status: baseline.status,
+  };
+}
+
+export async function updateScopeBaselineAction(data: {
+  baselineId: string;
+  structuredScope: unknown;
+}) {
+  const baseline =
+    await updateScopeBaseline(data);
+
+  return {
+    id: baseline.id,
+    version: baseline.version,
+  };
+}
+
+export async function approveScopeBaselineAction(
+  baselineId: string,
+) {
+  const baseline =
+    await approveScopeBaseline(baselineId);
+
+  return {
+    id: baseline.id,
+    version: baseline.version,
+    status: baseline.status,
+    approvedAt: baseline.approvedAt,
+  };
+}
+
+/**
+ * Add a brand-new item to a draft scope version.
+ *
+ * The domain layer assigns the ID and records manual-amendment provenance.
+ */
+export async function addManualScopeItemAction(
+  data: Parameters<typeof addManualScopeItem>[0],
+) {
+  const result =
+    await addManualScopeItem(data);
+
+  return {
+    id: result.itemId,
+    baselineId: result.baseline.id,
+    version: result.baseline.version,
+  };
+}
+
+/**
+ * Record a meaningful change to an existing scope item.
+ *
+ * The domain layer preserves original document evidence and records
+ * amendment metadata when the item came from the SOW.
+ */
+export async function amendScopeItemAction(
+  data: Parameters<typeof amendScopeItem>[0],
+) {
+  const result =
+    await amendScopeItem(data);
+
+  return {
+    id: result.itemId,
+    baselineId: result.baseline.id,
+    version: result.baseline.version,
+  };
+}
+
+/**
+ * Tombstone a scope item instead of deleting its historical identity.
+ */
+export async function removeScopeItemAction(
+  data: Parameters<typeof removeScopeItem>[0],
+) {
+  const result =
+    await removeScopeItem(data);
+
+  return {
+    id: result.itemId,
+    baselineId: result.baseline.id,
+    version: result.baseline.version,
+  };
+}
+
+/**
+ * Update the singleton timeline while preserving its provenance rules.
+ */
+export async function amendScopeTimelineAction(
+  data: Parameters<typeof amendScopeTimeline>[0],
+) {
+  const result =
+    await amendScopeTimeline(data);
+
+  return {
+    baselineId: result.baseline.id,
+    version: result.baseline.version,
+  };
+}
+export async function createScopeRevisionCandidateAction(
+  data: {
+    projectId: string;
+    sourceText: string;
+    sourceType?: string;
+  },
+) {
+  const candidate =
+    await createScopeRevisionCandidate(
+      data,
+    );
+
+  return {
+    id: candidate.id,
+    projectId:
+      candidate.projectId,
+    baseBaselineId:
+      candidate.baseBaselineId,
+    baseVersion:
+      candidate.baseVersion,
+    status:
+      candidate.status,
+    sourceType:
+      candidate.sourceType,
+  };
+}
+</file>
+
+<file path="lib/projects.ts">
+import { prisma } from "@/lib/db";
+import { getCurrentOrganizationId } from "@/lib/auth-session";
+
+// The authenticated session determines which organization owns the data.
+// The browser never gets to choose an organization ID.
+
+export async function getProjects() {
+  const organizationId = await getCurrentOrganizationId();
+
+  return prisma.project.findMany({
+    where: {
+      organizationId,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    include: {
+      client: true,
+    },
+  });
+}
+
+export async function getProject(id: string) {
+  const organizationId = await getCurrentOrganizationId();
+
+  // The organization condition prevents a user from accessing
+  // another organization's project even if they know its ID.
+  return prisma.project.findFirst({
+    where: {
+      id,
+      organizationId,
+    },
+  include: {
+  client: true,
+  scopeBaselines: {
+    orderBy: {
+      version: "desc",
+    },
+    take: 1,
+  },
+},
+  });
+}
+
+export async function createProject(data: {
+  name: string;
+  client: string;
+  value: number;
+  startDate?: string;
+  endDate?: string;
+}) {
+  const organizationId = await getCurrentOrganizationId();
+
+  // Clients belong to the authenticated organization.
+  const client = await prisma.client.create({
+    data: {
+      name: data.client,
+      organizationId,
+    },
+  });
+
+  // Create the project inside the authenticated organization.
+  return prisma.project.create({
+    data: {
+      name: data.name,
+      value: data.value,
+      startDate: data.startDate
+        ? new Date(data.startDate)
+        : undefined,
+      targetEndDate: data.endDate
+        ? new Date(data.endDate)
+        : undefined,
+      organizationId,
+      clientId: client.id,
+    },
+    include: {
+      client: true,
+    },
+  });
+}
+</file>
+
+<file path="lib/scope.ts">
+import { randomUUID } from "node:crypto";
+
+import { prisma } from "@/lib/db";
+import { getCurrentOrganizationId } from "@/lib/auth-session";
+import { extractScope } from "@/lib/ai/scope/extract";
+
+import {
+  parseStoredScope,
+  validateScopeSourceReferences,
+  type ExtractedScope,
+  type NormalizedScope,
+} from "@/lib/scope-schema";
+
+/**
+ * These are the scope sections that contain independently identifiable
+ * items. Timeline is intentionally excluded because it is a singleton.
+ */
+export type ScopeArraySection =
+  | "deliverables"
+  | "features"
+  | "exclusions"
+  | "clientResponsibilities"
+  | "revisionLimits"
+  | "assumptions";
+
+type ScopeArrayItem =
+  NormalizedScope[ScopeArraySection][number];
+
+type StandardManualItemInput = {
+  title: string;
+  description?: string;
+};
+
+type RevisionLimitManualItemInput = {
+  type: string;
+  limit: string;
+};
+
+type AssumptionManualItemInput = {
+  statement: string;
+};
+
+type ManualItemInput =
+  | StandardManualItemInput
+  | RevisionLimitManualItemInput
+  | AssumptionManualItemInput;
+
+/**
+ * Gemini only returns extraction data.
+ *
+ * Persistent identity and lifecycle metadata belong to the application,
+ * so Gemini can never invent historical IDs or provenance.
+ */
+function materializeExtractedScope(
+  scope: ExtractedScope,
+): NormalizedScope {
+  const materializeItem = <
+    T extends {
+      title: string;
+      description?: string;
+      sourceReferences: Array<{
+        quote: string;
+        section?: string;
+      }>;
+    },
+  >(
+    item: T,
+  ) => ({
+    ...item,
+    id: randomUUID(),
+    provenance: {
+      type: "document_extraction" as const,
+    },
+    status: "active" as const,
+  });
+
+  const hasTimelineContent =
+    Boolean(scope.timeline.duration?.trim()) ||
+    Boolean(
+      scope.timeline.startCondition?.trim(),
+    ) ||
+    scope.timeline.dependencies.length > 0 ||
+    scope.timeline.sourceReferences.length > 0;
+
+  return {
+    deliverables:
+      scope.deliverables.map(
+        materializeItem,
+      ),
+
+    features:
+      scope.features.map(
+        materializeItem,
+      ),
+
+    exclusions:
+      scope.exclusions.map(
+        materializeItem,
+      ),
+
+    clientResponsibilities:
+      scope.clientResponsibilities.map(
+        materializeItem,
+      ),
+
+    revisionLimits:
+      scope.revisionLimits.map(
+        (item) => ({
+          ...item,
+          id: randomUUID(),
+          provenance: {
+            type:
+              "document_extraction" as const,
+          },
+          status: "active" as const,
+        }),
+      ),
+
+    timeline: {
+      ...scope.timeline,
+
+      ...(hasTimelineContent
+        ? {
+            provenance: {
+              type:
+                "document_extraction" as const,
+            },
+          }
+        : {}),
+    },
+
+    assumptions:
+      scope.assumptions.map(
+        (item) => ({
+          ...item,
+          id: randomUUID(),
+          provenance: {
+            type:
+              "document_extraction" as const,
+          },
+          status: "active" as const,
+        }),
+      ),
+  };
+}
+
+/**
+ * Resolve a draft baseline through the current organization and parse
+ * its persisted JSON into the canonical normalized representation.
+ *
+ * Every mutation in this file goes through this boundary first.
+ */
+async function getDraftBaseline(
+  baselineId: string,
+) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const baseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        id: baselineId,
+        project: {
+          organizationId,
+        },
+      },
+      select: {
+        id: true,
+        projectId: true,
+        status: true,
+        sourceText: true,
+        structuredScope: true,
+      },
+    });
+
+  if (!baseline) {
+    throw new Error(
+      "Scope baseline not found.",
+    );
+  }
+
+  if (baseline.status !== "DRAFT") {
+    throw new Error(
+      "Only draft scope baselines can be modified.",
+    );
+  }
+
+  const parsed = parseStoredScope(
+    baseline.structuredScope,
+  );
+
+  if (!parsed.success) {
+    throw new Error(
+      "Scope structure is invalid.",
+    );
+  }
+
+  if (
+    !validateScopeSourceReferences(
+      parsed.data,
+      baseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return {
+    ...baseline,
+    structuredScope: parsed.data,
+  };
+}
+
+/**
+ * Persist a fully validated scope mutation.
+ *
+ * We validate again immediately before writing so every mutation has the
+ * same evidence and structural guarantees as the approval boundary.
+ */
+async function persistDraftScope(
+  baseline: {
+    id: string;
+    sourceText: string;
+  },
+  scope: NormalizedScope,
+) {
+  if (
+    !validateScopeSourceReferences(
+      scope,
+      baseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return prisma.scopeBaseline.update({
+    where: {
+      id: baseline.id,
+    },
+    data: {
+      structuredScope: scope,
+    },
+  });
+}
+
+/**
+ * Find an item inside one of the array-based scope sections.
+ */
+function findScopeItem(
+  scope: NormalizedScope,
+  section: ScopeArraySection,
+  itemId: string,
+) {
+  const items =
+    scope[section] as ScopeArrayItem[];
+
+  const index = items.findIndex(
+    (item) => item.id === itemId,
+  );
+
+  if (index === -1) {
+    throw new Error(
+      "Scope item not found.",
+    );
+  }
+
+  return {
+    items,
+    index,
+    item: items[index],
+  };
+}
+
+/**
+ * Add a brand-new scope item manually.
+ *
+ * Manual additions never receive fake SOW evidence. Their provenance
+ * explicitly records why the agency accepted the addition.
+ */
+export async function addManualScopeItem(data: {
+  baselineId: string;
+  section: ScopeArraySection;
+  item: ManualItemInput;
+  rationale: string;
+  referenceId: string;
+}) {
+  const baseline =
+    await getDraftBaseline(
+      data.baselineId,
+    );
+
+  const rationale =
+    data.rationale.trim();
+
+  const referenceId =
+    data.referenceId.trim();
+
+  if (!rationale) {
+    throw new Error(
+      "Amendment rationale is required.",
+    );
+  }
+
+  if (!referenceId) {
+    throw new Error(
+      "Amendment reference is required.",
+    );
+  }
+
+  let newItem: ScopeArrayItem;
+
+  switch (data.section) {
+    case "deliverables":
+    case "features":
+    case "exclusions":
+    case "clientResponsibilities": {
+      const item =
+        data.item as StandardManualItemInput;
+
+      const title =
+        item.title.trim();
+
+      if (!title) {
+        throw new Error(
+          "Title cannot be empty.",
+        );
+      }
+
+      newItem = {
+        title,
+        description:
+          item.description?.trim() ||
+          undefined,
+        sourceReferences: [],
+        id: randomUUID(),
+        provenance: {
+          type: "manual_amendment",
+          rationale,
+          referenceId,
+        },
+        status: "active",
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    case "revisionLimits": {
+      const item =
+        data.item as RevisionLimitManualItemInput;
+
+      const type =
+        item.type.trim();
+
+      const limit =
+        item.limit.trim();
+
+      if (!type || !limit) {
+        throw new Error(
+          "Revision limit type and limit cannot be empty.",
+        );
+      }
+
+      newItem = {
+        type,
+        limit,
+        sourceReferences: [],
+        id: randomUUID(),
+        provenance: {
+          type: "manual_amendment",
+          rationale,
+          referenceId,
+        },
+        status: "active",
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    case "assumptions": {
+      const item =
+        data.item as AssumptionManualItemInput;
+
+      const statement =
+        item.statement.trim();
+
+      if (!statement) {
+        throw new Error(
+          "Assumption statement cannot be empty.",
+        );
+      }
+
+      newItem = {
+        statement,
+        sourceReferences: [],
+        id: randomUUID(),
+        provenance: {
+          type: "manual_amendment",
+          rationale,
+          referenceId,
+        },
+        status: "active",
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    default:
+      throw new Error(
+        "Unsupported scope section.",
+      );
+  }
+
+  const updatedScope = {
+    ...baseline.structuredScope,
+    [data.section]: [
+      ...(baseline.structuredScope[
+        data.section
+      ] as ScopeArrayItem[]),
+      newItem,
+    ],
+  } as NormalizedScope;
+
+  const updated =
+    await persistDraftScope(
+      baseline,
+      updatedScope,
+    );
+
+  return {
+    baseline: updated,
+    itemId: newItem.id,
+  };
+}
+
+/**
+ * Edit the meaning of an existing scope item.
+ *
+ * Document-derived items retain their original document provenance and
+ * receive amendment metadata. This preserves the distinction between
+ * "where the item came from" and "why its meaning changed".
+ *
+ * Manual items remain manual amendments. Their version-local provenance
+ * records the reason/reference for the latest manual change.
+ */
+export async function amendScopeItem(data: {
+  baselineId: string;
+  section: ScopeArraySection;
+  itemId: string;
+  changes:
+    | StandardManualItemInput
+    | RevisionLimitManualItemInput
+    | AssumptionManualItemInput;
+  rationale: string;
+  referenceId: string;
+}) {
+  const baseline =
+    await getDraftBaseline(
+      data.baselineId,
+    );
+
+  const rationale =
+    data.rationale.trim();
+
+  const referenceId =
+    data.referenceId.trim();
+
+  if (!rationale) {
+    throw new Error(
+      "Amendment rationale is required.",
+    );
+  }
+
+  if (!referenceId) {
+    throw new Error(
+      "Amendment reference is required.",
+    );
+  }
+
+  const {
+    items,
+    index,
+    item,
+  } = findScopeItem(
+    baseline.structuredScope,
+    data.section,
+    data.itemId,
+  );
+
+  if (item.status !== "active") {
+    throw new Error(
+      "Removed scope items cannot be amended.",
+    );
+  }
+
+  let updatedItem: ScopeArrayItem;
+
+  switch (data.section) {
+    case "deliverables":
+    case "features":
+    case "exclusions":
+    case "clientResponsibilities": {
+      const changes =
+        data.changes as StandardManualItemInput;
+
+      const title =
+        changes.title.trim();
+
+      if (!title) {
+        throw new Error(
+          "Title cannot be empty.",
+        );
+      }
+
+      updatedItem = {
+        ...item,
+        title,
+        description:
+          changes.description?.trim() ||
+          undefined,
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    case "revisionLimits": {
+      const changes =
+        data.changes as RevisionLimitManualItemInput;
+
+      const type =
+        changes.type.trim();
+
+      const limit =
+        changes.limit.trim();
+
+      if (!type || !limit) {
+        throw new Error(
+          "Revision limit type and limit cannot be empty.",
+        );
+      }
+
+      updatedItem = {
+        ...item,
+        type,
+        limit,
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    case "assumptions": {
+      const changes =
+        data.changes as AssumptionManualItemInput;
+
+      const statement =
+        changes.statement.trim();
+
+      if (!statement) {
+        throw new Error(
+          "Assumption statement cannot be empty.",
+        );
+      }
+
+      updatedItem = {
+        ...item,
+        statement,
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    default:
+      throw new Error(
+        "Unsupported scope section.",
+      );
+  }
+
+  // Evidence is immutable. A caller can change semantic fields but can
+  // never replace the original document evidence through this operation.
+  updatedItem.sourceReferences =
+    item.sourceReferences;
+
+  if (
+    item.provenance.type ===
+    "document_extraction"
+  ) {
+    updatedItem.provenance = {
+      type: "document_extraction",
+    };
+
+    updatedItem.amendment = {
+      rationale,
+      referenceId,
+    };
+  } else {
+    updatedItem.provenance = {
+      type: "manual_amendment",
+      rationale,
+      referenceId,
+    };
+
+    // Manual items keep their rationale/reference in provenance.
+    delete updatedItem.amendment;
+  }
+
+  updatedItem.status = "active";
+  delete updatedItem.removal;
+
+  items[index] = updatedItem;
+
+  const updatedScope = {
+    ...baseline.structuredScope,
+    [data.section]:
+      items,
+  } as NormalizedScope;
+
+  const updated =
+    await persistDraftScope(
+      baseline,
+      updatedScope,
+    );
+
+  return {
+    baseline: updated,
+    itemId: data.itemId,
+  };
+}
+
+/**
+ * Tombstone an item instead of deleting it from the version snapshot.
+ *
+ * The item retains its identity, provenance, and original evidence.
+ * Only its lifecycle state changes.
+ */
+export async function removeScopeItem(data: {
+  baselineId: string;
+  section: ScopeArraySection;
+  itemId: string;
+  rationale: string;
+  referenceId: string;
+}) {
+  const baseline =
+    await getDraftBaseline(
+      data.baselineId,
+    );
+
+  const rationale =
+    data.rationale.trim();
+
+  const referenceId =
+    data.referenceId.trim();
+
+  if (!rationale) {
+    throw new Error(
+      "Removal rationale is required.",
+    );
+  }
+
+  if (!referenceId) {
+    throw new Error(
+      "Removal reference is required.",
+    );
+  }
+
+  const {
+    items,
+    index,
+    item,
+  } = findScopeItem(
+    baseline.structuredScope,
+    data.section,
+    data.itemId,
+  );
+
+  if (item.status === "removed") {
+    throw new Error(
+      "Scope item is already removed.",
+    );
+  }
+
+  items[index] = {
+    ...item,
+    status: "removed",
+    removal: {
+      rationale,
+      referenceId,
+    },
+  } as ScopeArrayItem;
+
+  const updatedScope = {
+    ...baseline.structuredScope,
+    [data.section]:
+      items,
+  } as NormalizedScope;
+
+  const updated =
+    await persistDraftScope(
+      baseline,
+      updatedScope,
+    );
+
+  return {
+    baseline: updated,
+    itemId: data.itemId,
+  };
+}
+
+/**
+ * Timeline has no item ID because it is a singleton.
+ *
+ * Document-derived timeline content keeps its source evidence and receives
+ * amendment metadata when its meaning changes. Manual timeline changes use
+ * manual provenance and therefore carry no fake document evidence.
+ */
+export async function amendScopeTimeline(data: {
+  baselineId: string;
+  duration?: string;
+  startCondition?: string;
+  dependencies: string[];
+  rationale: string;
+  referenceId: string;
+}) {
+  const baseline =
+    await getDraftBaseline(
+      data.baselineId,
+    );
+
+  const rationale =
+    data.rationale.trim();
+
+  const referenceId =
+    data.referenceId.trim();
+
+  if (!rationale) {
+    throw new Error(
+      "Amendment rationale is required.",
+    );
+  }
+
+  if (!referenceId) {
+    throw new Error(
+      "Amendment reference is required.",
+    );
+  }
+
+  const duration =
+    data.duration?.trim() ||
+    undefined;
+
+  const startCondition =
+    data.startCondition?.trim() ||
+    undefined;
+
+  const dependencies =
+    data.dependencies
+      .map((dependency) =>
+        dependency.trim(),
+      )
+      .filter(Boolean);
+
+  if (
+    !duration &&
+    !startCondition &&
+    dependencies.length === 0
+  ) {
+    throw new Error(
+      "Timeline must contain at least one value.",
+    );
+  }
+
+  const timeline =
+    baseline.structuredScope.timeline;
+
+  const updatedTimeline = {
+    ...timeline,
+    duration,
+    startCondition,
+    dependencies,
+  };
+
+  if (
+    timeline.provenance?.type ===
+    "document_extraction"
+  ) {
+    updatedTimeline.provenance = {
+      type: "document_extraction",
+    };
+
+    updatedTimeline.amendment = {
+      rationale,
+      referenceId,
+    };
+  } else {
+    updatedTimeline.sourceReferences = [];
+
+    updatedTimeline.provenance = {
+      type: "manual_amendment",
+      rationale,
+      referenceId,
+    };
+
+    delete updatedTimeline.amendment;
+  }
+
+  const updatedScope = {
+    ...baseline.structuredScope,
+    timeline:
+      updatedTimeline,
+  } as NormalizedScope;
+
+  const updated =
+    await persistDraftScope(
+      baseline,
+      updatedScope,
+    );
+
+  return {
+    baseline: updated,
+  };
+}
+
+export async function createScopeBaseline(data: {
+  projectId: string;
+  sourceText: string;
+}) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const sourceText =
+    data.sourceText.trim();
+
+  if (!sourceText) {
+    throw new Error(
+      "Scope text cannot be empty.",
+    );
+  }
+
+  // Enforce organization ownership before processing or persisting scope.
+  const project =
+    await prisma.project.findFirst({
+      where: {
+        id: data.projectId,
+        organizationId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+  if (!project) {
+    throw new Error(
+      "Project not found.",
+    );
+  }
+
+  // Gemini performs document extraction only.
+  const extractedScope =
+    await extractScope(sourceText);
+
+  // The application assigns persistent identity and document provenance.
+  const structuredScope =
+    materializeExtractedScope(
+      extractedScope,
+    );
+
+  // The persisted scope must pass the same strict evidence validation
+  // before it becomes a database record.
+  if (
+    !validateScopeSourceReferences(
+      structuredScope,
+      sourceText,
+    )
+  ) {
+    throw new Error(
+      "Extracted scope contains invalid source references.",
+    );
+  }
+
+  const latestBaseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        projectId: project.id,
+      },
+      orderBy: {
+        version: "desc",
+      },
+      select: {
+        version: true,
+      },
+    });
+
+  const version =
+    (latestBaseline?.version ?? 0) + 1;
+
+  return prisma.scopeBaseline.create({
+    data: {
+      projectId: project.id,
+      version,
+      status: "DRAFT",
+      sourceType: "PASTE",
+      sourceText,
+      structuredScope,
+    },
+  });
+}
+
+export async function createScopeVersion(
+  projectId: string,
+) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const project =
+    await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        organizationId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+  if (!project) {
+    throw new Error(
+      "Project not found.",
+    );
+  }
+
+  // Always create the next version from the latest approved version.
+  const latestBaseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        projectId: project.id,
+      },
+      orderBy: {
+        version: "desc",
+      },
+      select: {
+        id: true,
+        version: true,
+        status: true,
+        sourceType: true,
+        sourceText: true,
+        structuredScope: true,
+      },
+    });
+
+  if (!latestBaseline) {
+    throw new Error(
+      "No scope baseline exists for this project.",
+    );
+  }
+
+  if (
+    latestBaseline.status !==
+    "APPROVED"
+  ) {
+    throw new Error(
+      "The current scope version must be approved before creating a new version.",
+    );
+  }
+
+  // Legacy approved records are normalized here while we migrate the
+  // database to the canonical persisted representation.
+  const parsed = parseStoredScope(
+    latestBaseline.structuredScope,
+  );
+
+  if (!parsed.success) {
+    throw new Error(
+      "Scope structure is invalid.",
+    );
+  }
+
+  const structuredScope =
+    parsed.data;
+
+  if (
+    !validateScopeSourceReferences(
+      structuredScope,
+      latestBaseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return prisma.scopeBaseline.create({
+    data: {
+      projectId: project.id,
+      version:
+        latestBaseline.version + 1,
+      status: "DRAFT",
+      sourceType:
+        latestBaseline.sourceType,
+      sourceText:
+        latestBaseline.sourceText,
+      // Copy the approved snapshot exactly. IDs and provenance therefore
+      // survive into the next version unless a later amendment changes them.
+      structuredScope,
+    },
+  });
+}
+
+export async function updateScopeBaseline(data: {
+  baselineId: string;
+  structuredScope: unknown;
+}) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const baseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        id: data.baselineId,
+        project: {
+          organizationId,
+        },
+      },
+      select: {
+        id: true,
+        status: true,
+        sourceText: true,
+      },
+    });
+
+  if (!baseline) {
+    throw new Error(
+      "Scope baseline not found.",
+    );
+  }
+
+  if (
+    baseline.status !== "DRAFT"
+  ) {
+    throw new Error(
+      "Only draft scope baselines can be edited.",
+    );
+  }
+
+  // Keep the existing generic persistence path temporarily for the
+  // current review UI. New amendment-aware UI operations should use
+  // addManualScopeItem/amendScopeItem/removeScopeItem/amendScopeTimeline.
+  const parsed = parseStoredScope(
+    data.structuredScope,
+  );
+
+  if (!parsed.success) {
+    throw new Error(
+      "Invalid scope structure.",
+    );
+  }
+
+  if (
+    !validateScopeSourceReferences(
+      parsed.data,
+      baseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return prisma.scopeBaseline.update({
+    where: {
+      id: baseline.id,
+    },
+    data: {
+      structuredScope: parsed.data,
+    },
+  });
+}
+
+export async function approveScopeBaseline(
+  baselineId: string,
+) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const baseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        id: baselineId,
+        project: {
+          organizationId,
+        },
+      },
+      select: {
+        id: true,
+        status: true,
+        sourceText: true,
+        structuredScope: true,
+      },
+    });
+
+  if (!baseline) {
+    throw new Error(
+      "Scope baseline not found.",
+    );
+  }
+
+  if (
+    baseline.status !==
+    "DRAFT"
+  ) {
+    throw new Error(
+      "Only draft scope baselines can be approved.",
+    );
+  }
+
+  const parsed = parseStoredScope(
+    baseline.structuredScope,
+  );
+
+  if (!parsed.success) {
+    throw new Error(
+      "Scope structure is invalid.",
+    );
+  }
+
+  if (
+    !validateScopeSourceReferences(
+      parsed.data,
+      baseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return prisma.scopeBaseline.update({
+    where: {
+      id: baseline.id,
+    },
+    data: {
+      status: "APPROVED",
+      approvedAt: new Date(),
+      structuredScope: parsed.data,
+    },
+  });
+}
+</file>
+
+<file path="prisma/schema.prisma">
+// Scope Copilot's database models.
+//
+// Better Auth owns authentication and organization membership.
+// Our application models (Client, Project) build on top of that.
+//
+// Organization = an agency/workspace.
+// User         = an authenticated person.
+// Member       = connects users to organizations.
+// Client       = a client belonging to an organization.
+// Project      = a project belonging to an organization and client.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth: User
+// -----------------------------------------------------------------------------
+
+model User {
+  id            String   @id
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime
+  updatedAt     DateTime
+
+  sessions Session[]
+  accounts Account[]
+  members  Member[]
+
+  revisionReviewDecisions  RevisionReviewDecision[]
+  finalizedRevisionReviews RevisionReview[] @relation("RevisionReviewFinalizedBy")
+
+  @@map("user")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth: Session
+// -----------------------------------------------------------------------------
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime
+  updatedAt DateTime
+
+  ipAddress String?
+  userAgent String?
+
+  activeOrganizationId String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth: Account
+// -----------------------------------------------------------------------------
+
+model Account {
+  id         String @id
+  accountId  String
+  providerId String
+  userId     String
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+
+  createdAt DateTime
+  updatedAt DateTime
+
+  @@map("account")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth: Verification
+// -----------------------------------------------------------------------------
+
+model Verification {
+  id         String    @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime?
+  updatedAt  DateTime?
+
+  @@map("verification")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth Organization plugin
+// -----------------------------------------------------------------------------
+
+model Organization {
+  id       String  @id
+  name     String
+  slug     String  @unique
+  logo     String?
+  metadata String?
+
+  members     Member[]
+  invitations Invitation[]
+
+  clients  Client[]
+  projects Project[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@map("organization")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth Organization membership
+//
+// This replaces the old User.organizationId relationship.
+// A user belongs to an organization through this model.
+// -----------------------------------------------------------------------------
+
+model Member {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role      String
+  createdAt DateTime
+
+  @@index([organizationId])
+  @@index([userId])
+  @@map("member")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth Organization invitations
+// -----------------------------------------------------------------------------
+
+model Invitation {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  email     String
+  role      String?
+  status    String
+  expiresAt DateTime
+  inviterId String
+  createdAt DateTime
+
+  @@index([organizationId])
+  @@map("invitation")
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Client
+// -----------------------------------------------------------------------------
+
+model Client {
+  id    String  @id @default(cuid())
+  name  String
+  email String?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  projects Project[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Project
+// -----------------------------------------------------------------------------
+
+model Project {
+  id    String  @id @default(cuid())
+  name  String
+  value Decimal @db.Decimal(12, 2)
+
+  // Dates are optional because the user may not know the timeline
+  // when creating a project. Scope changes can affect the timeline later.
+  startDate     DateTime?
+  targetEndDate DateTime?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  scopeBaselines          ScopeBaseline[]
+  scopeRevisionCandidates ScopeRevisionCandidate[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([clientId])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Scope Baseline
+//
+// A ScopeBaseline is the structured representation of a project's agreed scope.
+// Multiple versions can exist over the lifetime of a project.
+//
+// The original/normalized source text is retained alongside the AI-extracted
+// structure so future decisions can always be grounded in the source material.
+// -----------------------------------------------------------------------------
+
+model ScopeBaseline {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  revisionCandidates ScopeRevisionCandidate[] @relation("ScopeBaselineRevisionCandidates")
+
+  // Baseline versions start at 1 and increase whenever the scope is formally
+  // revised. The database constraint prevents duplicate versions per project.
+  version Int @default(1)
+
+  // DRAFT     = extracted/edited but not yet approved
+  // APPROVED  = the active agreed scope
+  // ARCHIVED  = an older approved version
+  status String @default("DRAFT")
+
+  // How the scope entered the system.
+  // V1: PASTE, PDF, DOCX, TXT
+  sourceType String
+
+  // Normalized source content retained for traceability and AI grounding.
+  sourceText String @db.Text
+
+  // Structured scope extracted from the source.
+  //
+  // Expected shape:
+  // {
+  //   deliverables: [],
+  //   features: [],
+  //   exclusions: [],
+  //   revisionLimits: [],
+  //   timeline: {},
+  //   assumptions: []
+  // }
+  structuredScope Json
+
+  approvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, version])
+  @@index([projectId])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Scope Revision Candidate
+//
+// A revision candidate represents a newly supplied SOW that has been extracted
+// by AI but has NOT yet become an authoritative scope version.
+//
+// This is deliberately separate from ScopeBaseline:
+// AI output must pass through human reconciliation before V2/V3 is created.
+// -----------------------------------------------------------------------------
+
+model ScopeRevisionCandidate {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // The approved baseline this candidate is intended to replace/update.
+  baseBaselineId String
+  baseBaseline   ScopeBaseline @relation("ScopeBaselineRevisionCandidates", fields: [baseBaselineId], references: [id], onDelete: Cascade)
+
+  // PENDING_REVIEW = extracted and waiting for reconciliation.
+  // RECONCILED    = later completed by the reconciliation workflow.
+  // DISCARDED     = later explicitly abandoned.
+  status String @default("PENDING_REVIEW")
+
+  // How the revised SOW entered the system.
+  // 9A currently supports PASTE.
+  sourceType String
+
+  // The new SOW itself, retained as immutable candidate evidence.
+  sourceText String @db.Text
+
+  // IMPORTANT:
+  // This stores ExtractedScope, not NormalizedScope.
+  // IDs/provenance belong to the reconciliation/materialization stage.
+  extractedScope Json
+
+  // Durable reviewer state for this candidate.
+  // There can be only one review workspace per candidate.
+  review RevisionReview?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([baseBaselineId])
+  @@index([status])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Revision Review
+//
+// One durable review workspace belongs to one scope revision candidate.
+//
+// The review itself represents the lifecycle of the reconciliation session.
+// Individual reviewer choices are stored separately in RevisionReviewDecision
+// so we retain an audit trail rather than overwriting the previous decision.
+// -----------------------------------------------------------------------------
+
+model RevisionReview {
+  id String @id @default(cuid())
+
+  // One review workspace per revision candidate.
+  candidateId String @unique
+  candidate   ScopeRevisionCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  // IN_PROGRESS = reviewer can still make decisions.
+  // FINALIZING  = finalization has begun.
+  // FINALIZED   = candidate became a new scope draft.
+  // DISCARDED   = review was explicitly abandoned.
+  status String @default("IN_PROGRESS")
+
+  // Set when the review successfully produces the next scope draft.
+  finalizedAt DateTime?
+
+  // Reviewer who completed the finalization.
+  finalizedById String?
+  finalizedBy   User? @relation("RevisionReviewFinalizedBy", fields: [finalizedById], references: [id], onDelete: Restrict)
+
+  // Full decision history for this review.
+  decisions RevisionReviewDecision[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Revision Review Decision
+//
+// Decisions are intentionally append-only.
+//
+// If a reviewer changes an item's decision from CARRY_OVER to REMOVE,
+// we create another row instead of overwriting the previous one.
+//
+// The latest decision for an item is the authoritative current decision,
+// while older rows remain available as an audit history.
+// -----------------------------------------------------------------------------
+
+model RevisionReviewDecision {
+  id String @id @default(cuid())
+
+  reviewId String
+  review   RevisionReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  // Stable scope item ID from the approved base scope.
+  itemId String
+
+  // Scope section containing the reviewed item.
+  // Examples:
+  // deliverables, features, exclusions, clientResponsibilities,
+  // revisionLimits, assumptions
+  section String
+
+  // CARRY_OVER or REMOVE
+  decision String
+
+  // Authenticated user who made this decision.
+  actorId String
+  actor   User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  // Immutable audit timestamp.
+  createdAt DateTime @default(now())
+
+  @@index([reviewId, itemId])
+  @@index([actorId])
+}
+</file>
+
+<file path="app/(dashboard)/projects/[projectId]/page.tsx">
+import Link from "next/link";
+import {
+  ArrowUpRight,
+  CalendarDays,
+  CheckCircle2,
+  CircleAlert,
+  FileText,
+  Layers3,
+  ListChecks,
+} from "lucide-react";
+
+import { getProject } from "@/lib/projects";
+
+import { ProjectWorkspaceHeader } from "@/components/projects/project-workspace-header";
+import { ProjectWorkspaceNav } from "@/components/projects/project-workspace-nav";
+
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+
+import type { NormalizedScope } from "@/lib/scope-schema";
+
+interface ProjectPageProps {
+  params: Promise<{
+    projectId: string;
+  }>;
+}
+
+function formatDate(date: Date | null) {
+  if (!date) {
+    return "Not set";
+  }
+
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatCurrency(value: unknown) {
+  const amount = Number(value);
+
+  if (!Number.isFinite(amount)) {
+    return "$0";
+  }
+
+  return `$${amount.toLocaleString("en-US", {
+    maximumFractionDigits: 0,
+  })}`;
+}
+
+export default async function ProjectPage({
+  params,
+}: ProjectPageProps) {
+  const { projectId } = await params;
+
+  const project = await getProject(projectId);
+
+  if (!project) {
+    return (
+      <div className="px-5 py-8 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-7xl">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Project not found
+          </h1>
+
+          <Link
+            href="/projects"
+            className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Projects
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const baseline = project.scopeBaselines[0];
+
+  const scope =
+    baseline?.structuredScope as NormalizedScope | undefined;
+
+  const scopeStatus = baseline?.status ?? null;
+
+  return (
+    <div className="min-h-full">
+      <div className="mx-auto max-w-7xl px-5 py-6 sm:px-6 lg:px-8 lg:py-7">
+        <ProjectWorkspaceHeader
+          projectId={project.id}
+          projectName={project.name}
+          clientName={project.client.name}
+          value={project.value}
+          status="Active"
+        />
+
+        <ProjectWorkspaceNav
+          projectId={project.id}
+        />
+
+        {/* Overview */}
+        <section className="mt-6">
+          <div className="mb-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
+              Overview
+            </p>
+
+            <h2 className="mt-1 text-lg font-semibold tracking-tight">
+              Project at a glance
+            </h2>
+          </div>
+
+          {/* Compact project facts */}
+          <div className="grid divide-y rounded-xl border border-border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
+            <div className="p-4">
+              <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                {scopeStatus === "APPROVED" ? (
+                  <CheckCircle2 className="size-3.5 text-success" />
+                ) : (
+                  <FileText className="size-3.5" />
+                )}
+
+                <span>Scope</span>
+              </div>
+
+              <p className="mt-2 text-sm font-semibold">
+                {scopeStatus ?? "Not defined"}
+              </p>
+
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {baseline
+                  ? `Version ${baseline.version}`
+                  : "No baseline yet"}
+              </p>
+            </div>
+
+            <div className="p-4">
+              <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                <Layers3 className="size-3.5" />
+                <span>Deliverables</span>
+              </div>
+
+              <p className="mt-2 text-sm font-semibold">
+                {scope?.deliverables.length ?? 0}
+              </p>
+
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                In current scope
+              </p>
+            </div>
+
+            <div className="p-4">
+              <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                <ListChecks className="size-3.5" />
+                <span>Features</span>
+              </div>
+
+              <p className="mt-2 text-sm font-semibold">
+                {scope?.features.length ?? 0}
+              </p>
+
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                In current scope
+              </p>
+            </div>
+
+            <div className="p-4">
+              <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                <CalendarDays className="size-3.5" />
+                <span>Timeline</span>
+              </div>
+
+              <p className="mt-2 truncate text-sm font-semibold">
+                {scope?.timeline.duration ?? "Not set"}
+              </p>
+
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                {scope
+                  ? scope.timeline.startCondition ??
+                    "No start condition"
+                  : "No scope timeline"}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Scope status */}
+        <section className="mt-6">
+          <Card>
+            <CardHeader className="border-b px-5 py-4 sm:px-6">
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <CardTitle>Scope status</CardTitle>
+
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                    Your approved scope is the reference point for future
+                    client requests.
+                  </p>
+                </div>
+
+                <Link
+                  href={`/projects/${project.id}/scope`}
+                  className="shrink-0 whitespace-nowrap text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  View scope
+                  <ArrowUpRight className="ml-1 inline size-3.5" />
+                </Link>
+              </div>
+            </CardHeader>
+
+            <CardContent className="p-5 sm:p-6">
+              {!baseline ? (
+                <div className="flex flex-col gap-4 rounded-lg border border-dashed p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
+                      <FileText className="size-4 text-muted-foreground" />
+                    </div>
+
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">
+                        Scope has not been defined
+                      </p>
+
+                      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                        Capture the agreed project scope before evaluating
+                        client changes.
+                      </p>
+                    </div>
+                  </div>
+
+                  <Link
+                    href={`/projects/${project.id}/scope`}
+                    className="inline-flex shrink-0 items-center justify-center rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"
+                  >
+                    Define scope
+                  </Link>
+                </div>
+              ) : baseline.status === "DRAFT" ? (
+                <div className="flex flex-col gap-4 rounded-lg border border-warning/20 bg-warning/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-warning/10">
+                      <CircleAlert className="size-4 text-warning" />
+                    </div>
+
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">
+                        Scope draft needs review
+                      </p>
+
+                      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                        Review and approve the scope before using it as the
+                        project's commercial reference.
+                      </p>
+                    </div>
+                  </div>
+
+                  <Link
+                    href={`/projects/${project.id}/scope`}
+                    className="inline-flex shrink-0 items-center justify-center rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"
+                  >
+                    Review scope
+                  </Link>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-4 rounded-lg border border-success/15 bg-success/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-success/10">
+                      <CheckCircle2 className="size-4 text-success" />
+                    </div>
+
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">
+                        Scope v{baseline.version} is approved
+                      </p>
+
+                      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                        This locked baseline is the reference for future
+                        client requests.
+                      </p>
+                    </div>
+                  </div>
+
+                  <Link
+                    href={`/projects/${project.id}/scope`}
+                    className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-foreground hover:underline"
+                  >
+                    Open scope
+                    <ArrowUpRight className="size-3.5" />
+                  </Link>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </section>
+
+        {/* Project metadata */}
+        <section className="mt-6">
+          <Card>
+            <CardContent className="grid gap-5 p-5 sm:grid-cols-4 sm:p-6">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+                  Project value
+                </p>
+
+                <p className="mt-1.5 text-sm font-semibold">
+                  {formatCurrency(project.value)}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+                  Client
+                </p>
+
+                <p className="mt-1.5 truncate text-sm font-medium">
+                  {project.client.name}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+                  Start date
+                </p>
+
+                <p className="mt-1.5 text-sm font-medium">
+                  {formatDate(project.startDate)}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+                  Target end
+                </p>
+
+                <p className="mt-1.5 text-sm font-medium">
+                  {formatDate(project.targetEndDate)}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+
+        {/* Next step */}
+        <section className="mt-6">
+          <div className="flex flex-col gap-4 rounded-xl border border-dashed bg-muted/20 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                Next step
+              </p>
+
+              {baseline?.status === "APPROVED" ? (
+                <>
+                  <h2 className="mt-1 text-sm font-semibold">
+                    Ready for client requests
+                  </h2>
+
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                    Use the approved scope whenever a client asks for
+                    something new.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h2 className="mt-1 text-sm font-semibold">
+                    Establish the approved scope
+                  </h2>
+
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                    Define and approve the scope before relying on
+                    Scope Copilot for scope-change decisions.
+                  </p>
+                </>
+              )}
+            </div>
+
+            <Link
+              href={
+                baseline?.status === "APPROVED"
+                  ? `/projects/${project.id}/requests/new`
+                  : `/projects/${project.id}/scope`
+              }
+              className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-3.5 py-2 text-sm font-medium shadow-sm transition-colors hover:bg-muted"
+            >
+              {baseline?.status === "APPROVED"
+                ? "Start a client request"
+                : "Open scope"}
+
+              <ArrowUpRight className="size-3.5" />
+            </Link>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+</file>
+
+</files>
