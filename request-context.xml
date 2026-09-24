@@ -1,0 +1,1903 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+app/
+  (dashboard)/
+    projects/
+      [projectId]/
+        requests/
+          [requestId]/
+            page.tsx
+          actions.ts
+components/
+  projects/
+    request/
+      request-items-panel.tsx
+lib/
+  ai/
+    gemini-schema.ts
+    gemini.ts
+    provider.ts
+  requests.ts
+prisma/
+  schema.prisma
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="components/projects/request/request-items-panel.tsx">
+"use client";
+
+import {
+  Check,
+  ListChecks,
+  LoaderCircle,
+  Save,
+  Sparkles,
+  X,
+} from "lucide-react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+
+import {
+  decomposeClientRequestAction,
+  saveClientRequestItemsAction,
+} from "@/app/(dashboard)/projects/[projectId]/requests/actions";
+
+type ClientRequestItem = {
+  id: string;
+  position: number;
+  text: string;
+};
+
+type RequestItemsPanelProps = {
+  projectId: string;
+  requestId: string;
+  items: ClientRequestItem[];
+};
+
+export function RequestItemsPanel({
+  projectId,
+  requestId,
+  items,
+}: RequestItemsPanelProps) {
+  const router = useRouter();
+
+  const [suggestedItems, setSuggestedItems] =
+    useState<string[]>([]);
+
+  const [isBreakingDown, setIsBreakingDown] =
+    useState(false);
+
+  const [isSaving, setIsSaving] =
+    useState(false);
+
+  const [error, setError] =
+    useState<string | null>(null);
+
+  async function handleBreakdown() {
+    setIsBreakingDown(true);
+    setError(null);
+
+    try {
+      const result =
+        await decomposeClientRequestAction({
+          projectId,
+          requestId,
+        });
+
+      setSuggestedItems(result.items);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to analyze the client request.",
+      );
+    } finally {
+      setIsBreakingDown(false);
+    }
+  }
+
+  async function handleSave() {
+    const cleanedItems =
+      suggestedItems
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+    if (cleanedItems.length === 0) {
+      setError(
+        "At least one atomic request item is required.",
+      );
+      return;
+    }
+
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      await saveClientRequestItemsAction({
+        projectId,
+        requestId,
+        items: cleanedItems,
+      });
+
+      setSuggestedItems([]);
+      router.refresh();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to save atomic request items.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function updateSuggestedItem(
+    index: number,
+    value: string,
+  ) {
+    setSuggestedItems((current) =>
+      current.map((item, itemIndex) =>
+        itemIndex === index
+          ? value
+          : item,
+      ),
+    );
+  }
+
+  function removeSuggestedItem(index: number) {
+    setSuggestedItems((current) =>
+      current.filter(
+        (_, itemIndex) =>
+          itemIndex !== index,
+      ),
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader className="border-b px-5 py-4 sm:px-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <ListChecks className="size-4 shrink-0 text-muted-foreground" />
+
+              <CardTitle>
+                Atomic request items
+              </CardTitle>
+            </div>
+
+            <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+              Separate the client&apos;s message into independent asks
+              before scope analysis.
+            </p>
+          </div>
+
+          {items.length === 0 &&
+            suggestedItems.length === 0 &&
+            !isBreakingDown && (
+              <Button
+                type="button"
+                size="sm"
+                className="shrink-0"
+                onClick={handleBreakdown}
+              >
+                <Sparkles className="size-4" />
+                Analyze client request
+              </Button>
+            )}
+        </div>
+      </CardHeader>
+
+      <CardContent className="p-5 sm:p-6">
+        {error && (
+          <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/5 p-3.5">
+            <p className="text-sm leading-relaxed text-destructive">
+              {error}
+            </p>
+          </div>
+        )}
+
+        {isBreakingDown ? (
+          <div className="rounded-xl border bg-muted/20 p-5">
+            <div className="flex items-start gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-background shadow-sm">
+                <LoaderCircle className="size-4 animate-spin text-primary" />
+              </div>
+
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">
+                  Analyzing request…
+                </p>
+
+                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                  Identifying the individual client asks. This may
+                  take a few seconds.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              <div className="h-2 animate-pulse rounded-full bg-muted" />
+              <div className="h-2 w-4/5 animate-pulse rounded-full bg-muted" />
+              <div className="h-2 w-3/5 animate-pulse rounded-full bg-muted" />
+            </div>
+          </div>
+        ) : items.length > 0 ? (
+          <div>
+            <div className="mb-4 flex items-center gap-2 rounded-lg border bg-muted/20 px-3.5 py-3">
+              <Check className="size-4 shrink-0 text-primary" />
+
+              <p className="text-sm text-muted-foreground">
+                {items.length}{" "}
+                {items.length === 1
+                  ? "atomic ask"
+                  : "atomic asks"}{" "}
+                saved and ready for scope analysis.
+              </p>
+            </div>
+
+            <ol className="space-y-3">
+              {items.map((item) => (
+                <li
+                  key={item.id}
+                  className="flex items-start gap-3 rounded-lg border bg-background p-3.5"
+                >
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground">
+                    {item.position}
+                  </span>
+
+                  <p className="min-w-0 whitespace-pre-wrap break-words pt-0.5 text-sm leading-relaxed">
+                    {item.text}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ) : suggestedItems.length > 0 ? (
+          <div>
+            <div className="mb-5 rounded-xl border bg-muted/20 p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background shadow-sm">
+                  <Sparkles className="size-4 text-ai" />
+                </div>
+
+                <div>
+                  <p className="text-sm font-semibold">
+                    Review AI-generated breakdown
+                  </p>
+
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Check each ask against the original client message.
+                    You can edit or remove anything before saving.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {suggestedItems.map(
+                (item, index) => (
+                  <div
+                    key={`${index}-${item}`}
+                    className="flex items-start gap-2"
+                  >
+                    <span className="mt-2 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground">
+                      {index + 1}
+                    </span>
+
+                    <textarea
+                      value={item}
+                      onChange={(event) =>
+                        updateSuggestedItem(
+                          index,
+                          event.target.value,
+                        )
+                      }
+                      rows={2}
+                      disabled={isSaving}
+                      aria-label={`Atomic request item ${index + 1}`}
+                      className="min-h-16 flex-1 resize-y rounded-lg border bg-background px-3 py-2 text-sm leading-relaxed outline-none ring-offset-background transition-[border-color,box-shadow] placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-60"
+                    />
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        removeSuggestedItem(index)
+                      }
+                      disabled={isSaving}
+                      aria-label={`Remove item ${index + 1}`}
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                ),
+              )}
+            </div>
+
+            <div className="mt-5 flex flex-col gap-2 border-t pt-5 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Nothing is saved until you approve this breakdown.
+              </p>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setSuggestedItems([]);
+                    setError(null);
+                  }}
+                  disabled={isSaving}
+                >
+                  Cancel
+                </Button>
+
+                <Button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={
+                    isSaving ||
+                    suggestedItems.every(
+                      (item) => !item.trim(),
+                    )
+                  }
+                >
+                  {isSaving ? (
+                    <>
+                      <LoaderCircle className="size-4 animate-spin" />
+                      Saving…
+                    </>
+                  ) : (
+                    <>
+                      <Save className="size-4" />
+                      Save atomic items
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed bg-muted/10 p-5">
+            <div className="flex items-start gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+                <ListChecks className="size-4 text-muted-foreground" />
+              </div>
+
+              <div>
+                <p className="text-sm font-semibold">
+                  Ready to analyze
+                </p>
+
+                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                  Scope Copilot will identify the separate client asks
+                  from the original message. You&apos;ll review the
+                  suggestions before anything is saved.
+                </p>
+              </div>
+            </div>
+
+            <Button
+              type="button"
+              className="mt-4 w-full sm:w-auto"
+              onClick={handleBreakdown}
+            >
+              <Sparkles className="size-4" />
+              Analyze client request
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+</file>
+
+<file path="lib/ai/gemini-schema.ts">
+const sourceReferenceSchema = {
+  type: "object",
+  properties: {
+    quote: {
+      type: "string",
+    },
+    section: {
+      type: "string",
+    },
+  },
+  required: ["quote"],
+} as const;
+
+const scopeItemSchema = {
+  type: "object",
+  properties: {
+    title: {
+      type: "string",
+    },
+    description: {
+      type: "string",
+    },
+    sourceReferences: {
+      type: "array",
+      items: sourceReferenceSchema,
+    },
+  },
+  required: ["title", "sourceReferences"],
+} as const;
+
+const revisionLimitSchema = {
+  type: "object",
+  properties: {
+    type: {
+      type: "string",
+    },
+    limit: {
+      type: "string",
+    },
+    sourceReferences: {
+      type: "array",
+      items: sourceReferenceSchema,
+    },
+  },
+  required: ["type", "limit", "sourceReferences"],
+} as const;
+
+const timelineSchema = {
+  type: "object",
+  properties: {
+    duration: {
+      type: "string",
+    },
+    startCondition: {
+      type: "string",
+    },
+    dependencies: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+    },
+    sourceReferences: {
+      type: "array",
+      items: sourceReferenceSchema,
+    },
+  },
+  required: ["dependencies", "sourceReferences"],
+} as const;
+
+const assumptionSchema = {
+  type: "object",
+  properties: {
+    statement: {
+      type: "string",
+    },
+    sourceReferences: {
+      type: "array",
+      items: sourceReferenceSchema,
+    },
+  },
+  required: ["statement", "sourceReferences"],
+} as const;
+
+export const normalizedScopeGeminiSchema = {
+  type: "object",
+  properties: {
+    deliverables: {
+      type: "array",
+      items: scopeItemSchema,
+    },
+
+    features: {
+      type: "array",
+      items: scopeItemSchema,
+    },
+
+    exclusions: {
+      type: "array",
+      items: scopeItemSchema,
+    },
+
+    clientResponsibilities: {
+      type: "array",
+      items: scopeItemSchema,
+    },
+
+    revisionLimits: {
+      type: "array",
+      items: revisionLimitSchema,
+    },
+
+    timeline: timelineSchema,
+
+    assumptions: {
+      type: "array",
+      items: assumptionSchema,
+    },
+  },
+
+  required: [
+    "deliverables",
+    "features",
+    "exclusions",
+    "clientResponsibilities",
+    "revisionLimits",
+    "timeline",
+    "assumptions",
+  ],
+} as const;
+</file>
+
+<file path="lib/ai/provider.ts">
+export type GenerateStructuredOutputParams = {
+  systemInstruction: string;
+  userContent: string;
+  schema: unknown;
+};
+
+export type AIProvider = {
+  generateStructuredOutput<T>(
+    params: GenerateStructuredOutputParams,
+  ): Promise<T>;
+};
+</file>
+
+<file path="app/(dashboard)/projects/[projectId]/requests/[requestId]/page.tsx">
+import Link from "next/link";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Clock3,
+} from "lucide-react";
+import { notFound } from "next/navigation";
+
+import { getClientRequest } from "@/lib/requests";
+
+import { ProjectWorkspaceHeader } from "@/components/projects/project-workspace-header";
+import { ProjectWorkspaceNav } from "@/components/projects/project-workspace-nav";
+import { RequestItemsPanel } from "@/components/projects/request/request-items-panel";
+import { RequestStatusBadge } from "@/components/projects/request/request-status-badge";
+import type { RequestStatus } from "@/components/projects/request/request-status-badge";
+
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+
+interface RequestDetailPageProps {
+  params: Promise<{
+    projectId: string;
+    requestId: string;
+  }>;
+}
+
+function formatDate(date: Date) {
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export default async function RequestDetailPage({
+  params,
+}: RequestDetailPageProps) {
+  const {
+    projectId,
+    requestId,
+  } = await params;
+
+  const request = await getClientRequest(
+    projectId,
+    requestId,
+  );
+
+  if (!request) {
+    notFound();
+  }
+
+  const status =
+    request.status as RequestStatus;
+
+  return (
+    <div className="min-h-full">
+      <div className="mx-auto max-w-7xl px-5 py-6 sm:px-6 lg:px-8 lg:py-7">
+        {/* Keep the project context and primary project action visible while scrolling. */}
+        <div className="sticky top-0 z-30 -mx-5 bg-background/95 px-5 pb-1 backdrop-blur-md sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+          <ProjectWorkspaceHeader
+            projectId={request.project.id}
+            projectName={request.project.name}
+            clientName={
+              request.project.client.name
+            }
+            value={request.project.value}
+            status="Active"
+          />
+
+          <ProjectWorkspaceNav
+            projectId={request.project.id}
+          />
+        </div>
+
+        <div className="mt-7">
+          <Link
+            href={`/projects/${request.project.id}/requests`}
+            className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ArrowLeft className="size-3.5" />
+            Client requests
+          </Link>
+
+          <div className="mt-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                Client request
+              </p>
+
+              <RequestStatusBadge
+                status={status}
+              />
+            </div>
+
+            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">
+              Review client request
+            </h2>
+
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+              The original client wording is preserved, and this case
+              remains pinned to the exact approved scope version used
+              when it was captured.
+            </p>
+          </div>
+
+          {/* Request metadata is context, so keep it close to the title rather than below the work area. */}
+          <section
+            aria-label="Request context"
+            className="mt-6 grid gap-3 sm:grid-cols-2"
+          >
+            <Card>
+              <CardContent className="flex items-start gap-3 p-4">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                  <CheckCircle2 className="size-4 text-primary" />
+                </div>
+
+                <div className="min-w-0">
+                  <p className="text-xs font-medium uppercase tracking-[0.06em] text-muted-foreground">
+                    Scope reference
+                  </p>
+
+                  <p className="mt-1 text-sm font-semibold">
+                    Approved Scope v
+                    {
+                      request
+                        .analyzedAgainstBaseline
+                        .version
+                    }
+                  </p>
+
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    The exact baseline pinned to this request.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="flex items-start gap-3 p-4">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+                  <Clock3 className="size-4 text-muted-foreground" />
+                </div>
+
+                <div className="min-w-0">
+                  <p className="text-xs font-medium uppercase tracking-[0.06em] text-muted-foreground">
+                    Captured
+                  </p>
+
+                  <p className="mt-1 text-sm font-semibold">
+                    {formatDate(
+                      request.createdAt,
+                    )}
+                  </p>
+
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Original request stored as historical evidence.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+
+          <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.8fr)]">
+            <Card>
+              <CardHeader className="border-b px-5 py-4 sm:px-6">
+                <CardTitle>
+                  Original request
+                </CardTitle>
+
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Captured exactly as entered. This wording is preserved
+                  as the original client evidence.
+                </p>
+              </CardHeader>
+
+              <CardContent className="p-5 sm:p-6">
+                <div className="whitespace-pre-wrap break-words rounded-xl border bg-muted/20 p-4 text-sm leading-relaxed sm:p-5">
+                  {request.originalText}
+                </div>
+              </CardContent>
+            </Card>
+
+            <RequestItemsPanel
+              projectId={request.project.id}
+              requestId={request.id}
+              items={request.items}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="app/(dashboard)/projects/[projectId]/requests/actions.ts">
+"use server";
+
+import { revalidatePath } from "next/cache";
+
+import {
+  createClientRequest,
+  saveClientRequestItems,
+  getClientRequest,
+} from "@/lib/requests";
+
+import { decomposeClientRequestText } from "@/lib/ai/request/decompose";
+
+/**
+ * Server-side transport for request capture.
+ */
+export async function createClientRequestAction(data: {
+  projectId: string;
+  originalText: string;
+}) {
+  const request = await createClientRequest(data);
+
+  revalidatePath(
+    `/projects/${data.projectId}/requests`,
+  );
+
+  revalidatePath(
+    `/projects/${data.projectId}/requests/${request.id}`,
+  );
+
+  return {
+    id: request.id,
+    projectId: request.projectId,
+    analyzedAgainstBaselineId:
+      request.analyzedAgainstBaselineId,
+    baselineVersion: request.baselineVersion,
+    status: request.status,
+  };
+}
+
+/**
+ * Ask Gemini to break the immutable original client message into
+ * independently analyzable asks.
+ *
+ * Nothing is persisted by this action.
+ */
+export async function decomposeClientRequestAction(data: {
+  projectId: string;
+  requestId: string;
+}) {
+  const request = await getClientRequest(
+    data.projectId,
+    data.requestId,
+  );
+
+  if (!request) {
+    throw new Error("Client request not found.");
+  }
+
+  if (request.items.length > 0) {
+    throw new Error(
+      "Atomic request items already exist for this case file.",
+    );
+  }
+
+  return decomposeClientRequestText(
+    request.originalText,
+  );
+}
+
+/**
+ * Persist the human-reviewed atomic request items.
+ */
+export async function saveClientRequestItemsAction(data: {
+  projectId: string;
+  requestId: string;
+  items: string[];
+}) {
+  const items = await saveClientRequestItems({
+    clientRequestId: data.requestId,
+    items: data.items,
+  });
+
+  revalidatePath(
+    `/projects/${data.projectId}/requests/${data.requestId}`,
+  );
+
+  revalidatePath(
+    `/projects/${data.projectId}/requests`,
+  );
+
+  return {
+    items,
+  };
+}
+</file>
+
+<file path="lib/ai/gemini.ts">
+import { GoogleGenAI } from "@google/genai";
+
+import type {
+  AIProvider,
+  GenerateStructuredOutputParams,
+} from "./provider";
+
+type GeminiClient = {
+  models: {
+    generateContent: (params: {
+      model: string;
+      contents: string;
+      config: {
+        systemInstruction: string;
+        responseMimeType: "application/json";
+        responseSchema: unknown;
+      };
+    }) => Promise<{
+      text?: string;
+    }>;
+  };
+};
+
+function createGeminiClient(): GeminiClient {
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not configured.");
+  }
+
+  return new GoogleGenAI({
+    apiKey,
+  });
+}
+
+export function createGeminiProvider(
+  client?: GeminiClient,
+): AIProvider {
+  return {
+    async generateStructuredOutput<T>({
+      systemInstruction,
+      userContent,
+      schema,
+    }: GenerateStructuredOutputParams): Promise<T> {
+      const geminiClient = client ?? createGeminiClient();
+
+      const response = await geminiClient.models.generateContent({
+        model: process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest",
+        // model: "gemini-flash-latest",
+        contents: userContent,
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: schema,
+        },
+      });
+
+      if (!response.text) {
+        throw new Error("Gemini returned an empty response.");
+      }
+
+      try {
+        return JSON.parse(response.text) as T;
+      } catch {
+        throw new Error("Gemini returned invalid JSON.");
+      }
+    },
+  };
+}
+
+export const geminiProvider = createGeminiProvider();
+</file>
+
+<file path="lib/requests.ts">
+import { prisma } from "@/lib/db";
+import { getCurrentOrganizationId } from "@/lib/auth-session";
+
+export type ClientRequestStatus =
+  | "NEW"
+  | "ANALYZED"
+  | "REVIEW"
+  | "RESOLVED";
+
+/**
+ * Create a client request and pin it to the latest approved scope.
+ *
+ * The organization, project, baseline lookup, and request creation happen
+ * inside one transaction so the historical baseline choice is atomic.
+ */
+export async function createClientRequest(data: {
+  projectId: string;
+  originalText: string;
+}) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const projectId = data.projectId.trim();
+  const originalText = data.originalText;
+
+  if (!projectId) {
+    throw new Error("Project ID is required.");
+  }
+
+  if (!originalText.trim()) {
+    throw new Error("Client request cannot be empty.");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const project = await tx.project.findFirst({
+      where: {
+        id: projectId,
+        organizationId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!project) {
+      throw new Error("Project not found.");
+    }
+
+    const baseline = await tx.scopeBaseline.findFirst({
+      where: {
+        projectId: project.id,
+        status: "APPROVED",
+      },
+      orderBy: {
+        version: "desc",
+      },
+      select: {
+        id: true,
+        version: true,
+        status: true,
+      },
+    });
+
+    if (!baseline) {
+      throw new Error(
+        "An approved scope baseline is required before capturing a client request.",
+      );
+    }
+
+    const request = await tx.clientRequest.create({
+      data: {
+        projectId: project.id,
+        analyzedAgainstBaselineId: baseline.id,
+        originalText,
+        status: "NEW",
+      },
+      select: {
+        id: true,
+        projectId: true,
+        analyzedAgainstBaselineId: true,
+        originalText: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      ...request,
+      baselineVersion: baseline.version,
+    };
+  });
+}
+
+/**
+ * Load all client requests for a project.
+ *
+ * Organization ownership is checked server-side through the project relation.
+ */
+export async function getClientRequests(projectId: string) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const safeProjectId = projectId.trim();
+
+  if (!safeProjectId) {
+    throw new Error("Project ID is required.");
+  }
+
+  return prisma.clientRequest.findMany({
+    where: {
+      projectId: safeProjectId,
+      project: {
+        organizationId,
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    select: {
+      id: true,
+      projectId: true,
+      originalText: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+      analyzedAgainstBaseline: {
+        select: {
+          id: true,
+          version: true,
+          status: true,
+        },
+      },
+    },
+  });
+}
+
+/**
+ * Load one request only when both the project and request belong to the
+ * authenticated organization.
+ */
+export async function getClientRequest(
+  projectId: string,
+  requestId: string,
+) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const safeProjectId = projectId.trim();
+  const safeRequestId = requestId.trim();
+
+  if (!safeProjectId || !safeRequestId) {
+    throw new Error(
+      "Project ID and request ID are required.",
+    );
+  }
+
+  return prisma.clientRequest.findFirst({
+    where: {
+      id: safeRequestId,
+      projectId: safeProjectId,
+      project: {
+        organizationId,
+      },
+    },
+    select: {
+      id: true,
+      projectId: true,
+      originalText: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+
+      analyzedAgainstBaseline: {
+        select: {
+          id: true,
+          version: true,
+          status: true,
+        },
+      },
+
+      items: {
+        orderBy: {
+          position: "asc",
+        },
+        select: {
+          id: true,
+          clientRequestId: true,
+          position: true,
+          text: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+
+      project: {
+        select: {
+          id: true,
+          name: true,
+          value: true,
+          client: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * Create one atomic ask inside an existing case file.
+ */
+export async function createClientRequestItem(data: {
+  clientRequestId: string;
+  position: number;
+  text: string;
+}) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const clientRequestId = data.clientRequestId.trim();
+  const text = data.text;
+
+  if (!clientRequestId) {
+    throw new Error("Client request ID is required.");
+  }
+
+  if (
+    !Number.isInteger(data.position) ||
+    data.position < 1
+  ) {
+    throw new Error(
+      "Client request item position must be a positive integer.",
+    );
+  }
+
+  if (!text.trim()) {
+    throw new Error(
+      "Client request item cannot be empty.",
+    );
+  }
+
+  const request = await prisma.clientRequest.findFirst({
+    where: {
+      id: clientRequestId,
+      project: {
+        organizationId,
+      },
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!request) {
+    throw new Error("Client request not found.");
+  }
+
+  return prisma.clientRequestItem.create({
+    data: {
+      clientRequestId: request.id,
+      position: data.position,
+      text,
+    },
+    select: {
+      id: true,
+      clientRequestId: true,
+      position: true,
+      text: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+/**
+ * Load atomic asks for a case file.
+ */
+export async function getClientRequestItems(
+  clientRequestId: string,
+) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const safeClientRequestId =
+    clientRequestId.trim();
+
+  if (!safeClientRequestId) {
+    throw new Error(
+      "Client request ID is required.",
+    );
+  }
+
+  return prisma.clientRequestItem.findMany({
+    where: {
+      clientRequestId: safeClientRequestId,
+      clientRequest: {
+        project: {
+          organizationId,
+        },
+      },
+    },
+    orderBy: {
+      position: "asc",
+    },
+    select: {
+      id: true,
+      clientRequestId: true,
+      position: true,
+      text: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+/**
+ * Persist the reviewed AI decomposition.
+ *
+ * Items can only be created when the case file currently has no items.
+ * This prevents silently replacing already-established analysis inputs.
+ */
+export async function saveClientRequestItems(data: {
+  clientRequestId: string;
+  items: string[];
+}) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const clientRequestId =
+    data.clientRequestId.trim();
+
+  if (!clientRequestId) {
+    throw new Error(
+      "Client request ID is required.",
+    );
+  }
+
+  if (
+    !Array.isArray(data.items) ||
+    data.items.length < 1 ||
+    data.items.length > 20
+  ) {
+    throw new Error(
+      "A request must contain between 1 and 20 atomic items.",
+    );
+  }
+
+  const normalizedItems = data.items.map(
+    (item) => {
+      if (typeof item !== "string") {
+        throw new Error(
+          "Atomic request items must be text.",
+        );
+      }
+
+      const text = item.trim();
+
+      if (!text) {
+        throw new Error(
+          "Atomic request items cannot be empty.",
+        );
+      }
+
+      if (text.length > 1000) {
+        throw new Error(
+          "Atomic request items cannot exceed 1000 characters.",
+        );
+      }
+
+      return text;
+    },
+  );
+
+  const uniqueItems = new Set(
+    normalizedItems.map((item) =>
+      item.toLowerCase(),
+    ),
+  );
+
+  if (
+    uniqueItems.size !==
+    normalizedItems.length
+  ) {
+    throw new Error(
+      "Atomic request items must be unique.",
+    );
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const request =
+      await tx.clientRequest.findFirst({
+        where: {
+          id: clientRequestId,
+          project: {
+            organizationId,
+          },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+    if (!request) {
+      throw new Error(
+        "Client request not found.",
+      );
+    }
+
+    const existingCount =
+      await tx.clientRequestItem.count({
+        where: {
+          clientRequestId: request.id,
+        },
+      });
+
+    if (existingCount > 0) {
+      throw new Error(
+        "Atomic request items already exist for this case file.",
+      );
+    }
+
+    await tx.clientRequestItem.createMany({
+      data: normalizedItems.map(
+        (text, index) => ({
+          clientRequestId: request.id,
+          position: index + 1,
+          text,
+        }),
+      ),
+    });
+
+    return tx.clientRequestItem.findMany({
+      where: {
+        clientRequestId: request.id,
+      },
+      orderBy: {
+        position: "asc",
+      },
+      select: {
+        id: true,
+        clientRequestId: true,
+        position: true,
+        text: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  });
+}
+</file>
+
+<file path="prisma/schema.prisma">
+// Scope Copilot's database models.
+//
+// Better Auth owns authentication and organization membership.
+// Our application models (Client, Project) build on top of that.
+//
+// Organization = an agency/workspace.
+// User         = an authenticated person.
+// Member       = connects users to organizations.
+// Client       = a client belonging to an organization.
+// Project      = a project belonging to an organization and client.
+// ClientRequest = a client request evaluated against a specific approved scope version.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth: User
+// -----------------------------------------------------------------------------
+
+model User {
+  id            String   @id
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime
+  updatedAt     DateTime
+
+  sessions Session[]
+  accounts Account[]
+  members  Member[]
+
+  revisionReviewDecisions  RevisionReviewDecision[]
+  finalizedRevisionReviews RevisionReview[]         @relation("RevisionReviewFinalizedBy")
+
+  @@map("user")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth: Session
+// -----------------------------------------------------------------------------
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime
+  updatedAt DateTime
+
+  ipAddress String?
+  userAgent String?
+
+  activeOrganizationId String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth: Account
+// -----------------------------------------------------------------------------
+
+model Account {
+  id         String @id
+  accountId  String
+  providerId String
+  userId     String
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+
+  createdAt DateTime
+  updatedAt DateTime
+
+  @@map("account")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth: Verification
+// -----------------------------------------------------------------------------
+
+model Verification {
+  id         String    @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime?
+  updatedAt  DateTime?
+
+  @@map("verification")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth Organization plugin
+// -----------------------------------------------------------------------------
+
+model Organization {
+  id       String  @id
+  name     String
+  slug     String  @unique
+  logo     String?
+  metadata String?
+
+  members     Member[]
+  invitations Invitation[]
+
+  clients  Client[]
+  projects Project[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@map("organization")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth Organization membership
+//
+// This replaces the old User.organizationId relationship.
+// A user belongs to an organization through this model.
+// -----------------------------------------------------------------------------
+
+model Member {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role      String
+  createdAt DateTime
+
+  @@index([organizationId])
+  @@index([userId])
+  @@map("member")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth Organization invitations
+// -----------------------------------------------------------------------------
+
+model Invitation {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  email     String
+  role      String?
+  status    String
+  expiresAt DateTime
+  inviterId String
+  createdAt DateTime
+
+  @@index([organizationId])
+  @@map("invitation")
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Client
+// -----------------------------------------------------------------------------
+
+model Client {
+  id    String  @id @default(cuid())
+  name  String
+  email String?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  projects Project[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Project
+// -----------------------------------------------------------------------------
+
+model Project {
+  id    String  @id @default(cuid())
+  name  String
+  value Decimal @db.Decimal(12, 2)
+
+  // Dates are optional because the user may not know the timeline
+  // when creating a project. Scope changes can affect the timeline later.
+  startDate     DateTime?
+  targetEndDate DateTime?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  scopeBaselines          ScopeBaseline[]
+  scopeRevisionCandidates ScopeRevisionCandidate[]
+  clientRequests          ClientRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([clientId])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Scope Baseline
+//
+// A ScopeBaseline is the structured representation of a project's agreed scope.
+// Multiple versions can exist over the lifetime of a project.
+//
+// The original/normalized source text is retained alongside the AI-extracted
+// structure so future decisions can always be grounded in the source material.
+// -----------------------------------------------------------------------------
+
+model ScopeBaseline {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  revisionCandidates ScopeRevisionCandidate[] @relation("ScopeBaselineRevisionCandidates")
+
+  // Requests evaluated against this exact baseline.
+  clientRequests ClientRequest[] @relation("ClientRequestAnalyzedAgainstBaseline")
+
+  // Baseline versions start at 1 and increase whenever the scope is formally
+  // revised. The database constraint prevents duplicate versions per project.
+  version Int @default(1)
+
+  // DRAFT     = extracted/edited but not yet approved
+  // APPROVED  = the active agreed scope
+  // ARCHIVED  = an older approved version
+  status String @default("DRAFT")
+
+  // How the scope entered the system.
+  // V1: PASTE, PDF, DOCX, TXT
+  sourceType String
+
+  // Normalized source content retained for traceability and AI grounding.
+  sourceText String @db.Text
+
+  // Structured scope extracted from the source.
+  //
+  // Expected shape:
+  // {
+  //   deliverables: [],
+  //   features: [],
+  //   exclusions: [],
+  //   clientResponsibilities: [],
+  //   revisionLimits: [],
+  //   timeline: {},
+  //   assumptions: []
+  // }
+  structuredScope Json
+
+  approvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, version])
+  @@index([projectId])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Client Request
+//
+// A ClientRequest is an immutable capture of a client's request.
+//
+// IMPORTANT:
+// analyzedAgainstBaselineId pins the exact approved scope version used for
+// evaluation. Future scope versions must never silently change history.
+// -----------------------------------------------------------------------------
+
+model ClientRequest {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Exact approved scope baseline used when this request was captured for
+  // analysis. Restrict prevents accidental deletion of a referenced baseline.
+  analyzedAgainstBaselineId String
+  analyzedAgainstBaseline   ScopeBaseline @relation("ClientRequestAnalyzedAgainstBaseline", fields: [analyzedAgainstBaselineId], references: [id], onDelete: Restrict)
+
+  // Preserve the original request wording exactly as captured.
+  originalText String @db.Text
+
+  // Atomic asks extracted from this case file. The case remains the immutable
+  // source record; items are the independently analyzable decomposition.
+  items ClientRequestItem[]
+
+  // NEW       = captured, analysis not yet run
+  // ANALYZED  = decision engine has produced an analysis
+  // REVIEW    = human review required
+  // RESOLVED  = request has been resolved
+  status String @default("NEW")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, createdAt])
+  @@index([analyzedAgainstBaselineId])
+  @@index([status])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Client Request Item
+//
+// A ClientRequestItem is one atomic ask inside a ClientRequest case file.
+// It is deliberately limited to decomposition/persistence at this stage.
+// Classification, economics, recommendations, and outcomes are added later.
+// -----------------------------------------------------------------------------
+
+model ClientRequestItem {
+  id String @id @default(cuid())
+
+  clientRequestId String
+  clientRequest   ClientRequest @relation(fields: [clientRequestId], references: [id], onDelete: Cascade)
+
+  // Stable ordering within the case file. Positions are 1-based.
+  position Int
+
+  // Atomic wording used for independent analysis. The complete original client
+  // message remains preserved on ClientRequest.originalText as immutable evidence.
+  text String @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clientRequestId, position])
+  @@index([clientRequestId])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Scope Revision Candidate
+//
+// A revision candidate represents a newly supplied SOW that has been extracted
+// by AI but has NOT yet become an authoritative scope version.
+//
+// This is deliberately separate from ScopeBaseline:
+// AI output must pass through human reconciliation before V2/V3 is created.
+// -----------------------------------------------------------------------------
+
+model ScopeRevisionCandidate {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // The approved baseline this candidate is intended to replace/update.
+  baseBaselineId String
+  baseBaseline   ScopeBaseline @relation("ScopeBaselineRevisionCandidates", fields: [baseBaselineId], references: [id], onDelete: Cascade)
+
+  // PENDING_REVIEW = extracted and waiting for reconciliation.
+  // RECONCILED    = later completed by the reconciliation workflow.
+  // DISCARDED     = later explicitly abandoned.
+  status String @default("PENDING_REVIEW")
+
+  // How the revised SOW entered the system.
+  // 9A currently supports PASTE.
+  sourceType String
+
+  // The new SOW itself, retained as immutable candidate evidence.
+  sourceText String @db.Text
+
+  // IMPORTANT:
+  // This stores ExtractedScope, not NormalizedScope.
+  // IDs/provenance belong to the reconciliation/materialization stage.
+  extractedScope Json
+
+  // Durable reviewer state for this candidate.
+  // There can be only one review workspace per candidate.
+  review RevisionReview?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([baseBaselineId])
+  @@index([status])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Revision Review
+//
+// One durable review workspace belongs to one scope revision candidate.
+//
+// The review itself represents the lifecycle of the reconciliation session.
+// Individual reviewer choices are stored separately in RevisionReviewDecision
+// so we retain an audit trail rather than overwriting the previous decision.
+// -----------------------------------------------------------------------------
+
+model RevisionReview {
+  id String @id @default(cuid())
+
+  // One review workspace per revision candidate.
+  candidateId String                 @unique
+  candidate   ScopeRevisionCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  // IN_PROGRESS = reviewer can still make decisions.
+  // FINALIZING  = finalization has begun.
+  // FINALIZED   = candidate became a new scope draft.
+  // DISCARDED   = review was explicitly abandoned.
+  status String @default("IN_PROGRESS")
+
+  // Set when the review successfully produces the next scope draft.
+  finalizedAt DateTime?
+
+  // Reviewer who completed the finalization.
+  finalizedById String?
+  finalizedBy   User?   @relation("RevisionReviewFinalizedBy", fields: [finalizedById], references: [id], onDelete: Restrict)
+
+  // Full decision history for this review.
+  decisions RevisionReviewDecision[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Revision Review Decision
+//
+// Decisions are intentionally append-only.
+//
+// If a reviewer changes an item's decision from CARRY_OVER to REMOVE,
+// we create another row instead of overwriting the previous one.
+//
+// The latest decision for an item is the authoritative current decision,
+// while older rows remain available as an audit history.
+// -----------------------------------------------------------------------------
+
+model RevisionReviewDecision {
+  id String @id @default(cuid())
+
+  reviewId String
+  review   RevisionReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  // Stable scope item ID from the approved base scope.
+  itemId String
+
+  // Scope section containing the reviewed item.
+  // Examples:
+  // deliverables, features, exclusions, clientResponsibilities,
+  // revisionLimits, assumptions
+  section String
+
+  // CARRY_OVER or REMOVE
+  decision String
+
+  // Authenticated user who made this decision.
+  actorId String
+  actor   User   @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  // Immutable audit timestamp.
+  createdAt DateTime @default(now())
+
+  @@index([reviewId, itemId])
+  @@index([actorId])
+}
+</file>
+
+</files>

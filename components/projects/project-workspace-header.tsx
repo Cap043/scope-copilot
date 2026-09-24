@@ -33,44 +33,20 @@ export function ProjectWorkspaceHeader({
   showRequestAction = true,
 }: ProjectWorkspaceHeaderProps) {
   return (
-    <header className="shrink-0 border-b border-border/70 pb-3">
-      <Link
-        href="/projects"
-        className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ArrowLeft className="size-3.5" />
-        Projects
-      </Link>
-
-     <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h1 className="min-w-0 break-words text-xl font-semibold tracking-[-0.03em] sm:text-2xl">
-              {projectName}
-            </h1>
-
-            {status && (
-              <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                {status}
-              </span>
-            )}
-          </div>
-
-          <div className="mt-1 flex flex-wrap items-center gap-x-2.5 text-xs text-muted-foreground">
-            <span>{clientName}</span>
-
-            <span className="text-border">•</span>
-
-            <span>
-              {formatCurrency(value)}
-            </span>
-          </div>
-        </div>
+    <header className="shrink-0 border-b border-border/70 pb-2.5">
+      <div className="flex items-center justify-between gap-4">
+        <Link
+          href="/projects"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeft className="size-3.5" />
+          Scope Copilot
+        </Link>
 
         {showRequestAction && (
           <Button
             size="sm"
-           className="w-full sm:w-auto"
+            className="h-8 shrink-0"
             nativeButton={false}
             render={
               <Link
@@ -82,6 +58,34 @@ export function ProjectWorkspaceHeader({
             New Client Request
           </Button>
         )}
+      </div>
+
+      <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <h1 className="min-w-0 break-words text-lg font-semibold tracking-[-0.03em] sm:text-xl">
+          {projectName}
+        </h1>
+
+        {status && (
+          <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            {status}
+          </span>
+        )}
+
+        <span className="hidden text-border sm:inline">
+          •
+        </span>
+
+        <span className="text-xs text-muted-foreground">
+          {clientName}
+        </span>
+
+        <span className="hidden text-border sm:inline">
+          •
+        </span>
+
+        <span className="text-xs font-medium text-muted-foreground">
+          Cap {formatCurrency(value)}
+        </span>
       </div>
     </header>
   );

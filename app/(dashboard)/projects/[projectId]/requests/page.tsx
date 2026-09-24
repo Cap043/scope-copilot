@@ -24,20 +24,6 @@ interface RequestsPageProps {
   }>;
 }
 
-function getRequestTitle(text: string) {
-  const firstLine =
-    text
-      .split(/\r?\n/)
-      .find((line) => line.trim().length > 0)
-      ?.trim() ?? "Client request";
-
-  if (firstLine.length <= 72) {
-    return firstLine;
-  }
-
-  return `${firstLine.slice(0, 69).trimEnd()}…`;
-}
-
 function getRequestPreview(text: string) {
   return text.trim();
 }
@@ -74,26 +60,30 @@ export default async function RequestsPage({
 
   return (
     <div className="min-h-full">
-      <div className="mx-auto max-w-7xl px-5 py-7 sm:px-6 lg:px-8 lg:py-8">
-        <ProjectWorkspaceHeader
-          projectId={project.id}
-          projectName={project.name}
-          clientName={project.client.name}
-          value={project.value}
-          status="Active"
-        />
+      <div className="mx-auto max-w-7xl px-5 py-5 sm:px-6 lg:px-8 lg:py-6">
+        {/* Sticky project workspace header + navigation */}
+        <div className="sticky top-0 z-40 -mx-5 bg-background/95 px-5 pb-1 backdrop-blur-md sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+          <ProjectWorkspaceHeader
+            projectId={project.id}
+            projectName={project.name}
+            clientName={project.client.name}
+            value={project.value}
+            status="Active"
+            showRequestAction={false}
+          />
 
-        <ProjectWorkspaceNav projectId={project.id} />
+          <ProjectWorkspaceNav projectId={project.id} />
+        </div>
 
-        <div className="mt-7">
+        <main className="mt-5">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-            <div>
+            <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                 Requests
               </p>
 
               <h2 className="mt-1 text-2xl font-semibold tracking-tight">
-                Client requests
+                Client Requests
               </h2>
 
               <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
@@ -102,9 +92,10 @@ export default async function RequestsPage({
               </p>
             </div>
 
+            {/* The contextual action lives only inside the active tab. */}
             <Link
               href={`/projects/${project.id}/requests/new`}
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+              className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg bg-primary px-3.5 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
             >
               <Plus className="size-4" />
               New Client Request
@@ -153,9 +144,6 @@ export default async function RequestsPage({
                     key={request.id}
                     projectId={project.id}
                     requestId={request.id}
-                    title={getRequestTitle(
-                      request.originalText,
-                    )}
                     preview={getRequestPreview(
                       request.originalText,
                     )}
@@ -163,19 +151,18 @@ export default async function RequestsPage({
                       request.status as RequestStatus
                     }
                     analyzedAgainstVersion={
-                      request
-                        .analyzedAgainstBaseline
-                        .version
+                      request.analyzedAgainstBaseline.version
                     }
                     createdLabel={formatCreatedAt(
                       request.createdAt,
                     )}
+                    asksCount={request._count.items}
                   />
                 ))}
               </div>
             </section>
           )}
-        </div>
+        </main>
       </div>
     </div>
   );

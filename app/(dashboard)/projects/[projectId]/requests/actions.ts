@@ -1,4 +1,4 @@
-"use server";
+ "use server";
 
 import { revalidatePath } from "next/cache";
 
@@ -69,6 +69,10 @@ export async function decomposeClientRequestAction(data: {
 
 /**
  * Persist the human-reviewed atomic request items.
+ *
+ * The saved items are returned directly to the client so the
+ * current analysis workspace can transition without refreshing
+ * the entire Server Component tree.
  */
 export async function saveClientRequestItemsAction(data: {
   projectId: string;
@@ -80,6 +84,8 @@ export async function saveClientRequestItemsAction(data: {
     items: data.items,
   });
 
+  // Keep future server renders and the request list fresh.
+  // The current client workspace does not need router.refresh().
   revalidatePath(
     `/projects/${data.projectId}/requests/${data.requestId}`,
   );
@@ -89,6 +95,10 @@ export async function saveClientRequestItemsAction(data: {
   );
 
   return {
-    items,
+    items: items.map((item) => ({
+      id: item.id,
+      position: item.position,
+      text: item.text,
+    })),
   };
 }

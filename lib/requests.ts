@@ -96,6 +96,14 @@ export async function createClientRequest(data: {
  *
  * Organization ownership is checked server-side through the project relation.
  */
+/**
+ * Load all client requests for a project.
+ *
+ * Organization ownership is checked server-side through the project relation.
+ *
+ * Only the atomic-item count is loaded here because the requests list
+ * does not need the full item records.
+ */
 export async function getClientRequests(projectId: string) {
   const organizationId = await getCurrentOrganizationId();
 
@@ -122,6 +130,7 @@ export async function getClientRequests(projectId: string) {
       status: true,
       createdAt: true,
       updatedAt: true,
+
       analyzedAgainstBaseline: {
         select: {
           id: true,
@@ -129,10 +138,15 @@ export async function getClientRequests(projectId: string) {
           status: true,
         },
       },
+
+      _count: {
+        select: {
+          items: true,
+        },
+      },
     },
   });
 }
-
 /**
  * Load one request only when both the project and request belong to the
  * authenticated organization.

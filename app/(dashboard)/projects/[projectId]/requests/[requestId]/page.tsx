@@ -1,6 +1,4 @@
-import Link from "next/link";
 import {
-  ArrowLeft,
   CheckCircle2,
   Clock3,
 } from "lucide-react";
@@ -13,13 +11,6 @@ import { ProjectWorkspaceNav } from "@/components/projects/project-workspace-nav
 import { RequestItemsPanel } from "@/components/projects/request/request-items-panel";
 import { RequestStatusBadge } from "@/components/projects/request/request-status-badge";
 import type { RequestStatus } from "@/components/projects/request/request-status-badge";
-
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 
 interface RequestDetailPageProps {
   params: Promise<{
@@ -60,15 +51,20 @@ export default async function RequestDetailPage({
 
   return (
     <div className="min-h-full">
-      <div className="mx-auto max-w-7xl px-5 py-6 sm:px-6 lg:px-8 lg:py-7">
-        {/* Keep the project context and primary project action visible while scrolling. */}
-        <div className="sticky top-0 z-30 -mx-5 bg-background/95 px-5 pb-1 backdrop-blur-md sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+      <div className="mx-auto max-w-7xl px-5 py-5 sm:px-6 lg:px-8 lg:py-6">
+
+        {/* 
+         * Project-level context stays pinned while the request
+         * analysis workspace scrolls underneath it.
+         *
+         * Header + project navigation intentionally live in the
+         * same sticky container so they never separate while scrolling.
+         */}
+        <div className="sticky top-0 z-40 -mx-5 bg-background/95 px-5 pb-1 backdrop-blur-md sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
           <ProjectWorkspaceHeader
             projectId={request.project.id}
             projectName={request.project.name}
-            clientName={
-              request.project.client.name
-            }
+            clientName={request.project.client.name}
             value={request.project.value}
             status="Active"
           />
@@ -78,54 +74,42 @@ export default async function RequestDetailPage({
           />
         </div>
 
-        <div className="mt-7">
-          <Link
-            href={`/projects/${request.project.id}/requests`}
-            className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="size-3.5" />
-            Client requests
-          </Link>
+        <main className="mt-5">
+          {/* Request identity + compact scope context */}
+          <div className="flex flex-col gap-3 border-b border-border/70 pb-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">
+                  Request Analysis
+                </h2>
 
-          <div className="mt-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                Client request
+                <RequestStatusBadge
+                  status={status}
+                />
+              </div>
+
+              <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+                Review the client request, break it into atomic asks,
+                and prepare it for scope analysis.
               </p>
-
-              <RequestStatusBadge
-                status={status}
-              />
             </div>
 
-            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">
-              Review client request
-            </h2>
-
-            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-              The original client wording is preserved, and this case
-              remains pinned to the exact approved scope version used
-              when it was captured.
-            </p>
-          </div>
-
-          {/* Request metadata is context, so keep it close to the title rather than below the work area. */}
-          <section
-            aria-label="Request context"
-            className="mt-6 grid gap-3 sm:grid-cols-2"
-          >
-            <Card>
-              <CardContent className="flex items-start gap-3 p-4">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                  <CheckCircle2 className="size-4 text-primary" />
+            {/* Compact request metadata */}
+            <section
+              aria-label="Request context"
+              className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs"
+            >
+              <div className="flex items-center gap-2">
+                <div className="flex size-7 items-center justify-center rounded-md bg-primary/10">
+                  <CheckCircle2 className="size-3.5 text-primary" />
                 </div>
 
-                <div className="min-w-0">
-                  <p className="text-xs font-medium uppercase tracking-[0.06em] text-muted-foreground">
-                    Scope reference
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-[0.07em] text-muted-foreground">
+                    Scope
                   </p>
 
-                  <p className="mt-1 text-sm font-semibold">
+                  <p className="font-semibold">
                     Approved Scope v
                     {
                       request
@@ -133,66 +117,86 @@ export default async function RequestDetailPage({
                         .version
                     }
                   </p>
-
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                    The exact baseline pinned to this request.
-                  </p>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
 
-            <Card>
-              <CardContent className="flex items-start gap-3 p-4">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-                  <Clock3 className="size-4 text-muted-foreground" />
+              <div className="hidden h-7 w-px bg-border sm:block" />
+
+              <div className="flex items-center gap-2">
+                <div className="flex size-7 items-center justify-center rounded-md bg-muted">
+                  <Clock3 className="size-3.5 text-muted-foreground" />
                 </div>
 
-                <div className="min-w-0">
-                  <p className="text-xs font-medium uppercase tracking-[0.06em] text-muted-foreground">
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-[0.07em] text-muted-foreground">
                     Captured
                   </p>
 
-                  <p className="mt-1 text-sm font-semibold">
+                  <p className="font-semibold">
                     {formatDate(
                       request.createdAt,
                     )}
                   </p>
+                </div>
+              </div>
+            </section>
+          </div>
 
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                    Original request stored as historical evidence.
+          {/* 
+           * Immutable original client evidence.
+           * Collapsed by default so the analysis workspace gets
+           * the majority of the vertical space.
+           */}
+          <details className="group mt-4 rounded-xl border bg-card shadow-sm">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3.5 sm:px-5 [&::-webkit-details-marker]:hidden">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+                    Original client request
                   </p>
+
+                  <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+                    Immutable evidence
+                  </span>
                 </div>
-              </CardContent>
-            </Card>
-          </section>
 
-          <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.8fr)]">
-            <Card>
-              <CardHeader className="border-b px-5 py-4 sm:px-6">
-                <CardTitle>
-                  Original request
-                </CardTitle>
-
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Captured exactly as entered. This wording is preserved
-                  as the original client evidence.
-                </p>
-              </CardHeader>
-
-              <CardContent className="p-5 sm:p-6">
-                <div className="whitespace-pre-wrap break-words rounded-xl border bg-muted/20 p-4 text-sm leading-relaxed sm:p-5">
+                <p className="mt-1 truncate text-sm text-muted-foreground">
                   {request.originalText}
-                </div>
-              </CardContent>
-            </Card>
+                </p>
+              </div>
 
+              <svg
+                className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <path
+                  d="m6 9 6 6 6-6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </summary>
+
+            <div className="border-t px-4 py-4 sm:px-5">
+              <div className="whitespace-pre-wrap break-words rounded-lg border bg-muted/20 p-4 text-sm leading-relaxed">
+                {request.originalText}
+              </div>
+            </div>
+          </details>
+
+          {/* Main request-analysis workspace */}
+          <div className="mt-4">
             <RequestItemsPanel
               projectId={request.project.id}
               requestId={request.id}
               items={request.items}
             />
           </div>
-        </div>
+        </main>
       </div>
     </div>
   );
