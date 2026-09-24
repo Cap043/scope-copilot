@@ -2,13 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 
-import { createClientRequest } from "@/lib/requests";
+import {
+  createClientRequest,
+  saveClientRequestItems,
+  getClientRequest,
+} from "@/lib/requests";
+
+import { decomposeClientRequestText } from "@/lib/ai/request/decompose";
 
 /**
  * Server-side transport for request capture.
- *
- * The domain function performs authentication, tenant isolation, approved
- * baseline resolution, and persistence. This action only connects the UI to it.
  */
 export async function createClientRequestAction(data: {
   projectId: string;
@@ -16,7 +19,10 @@ export async function createClientRequestAction(data: {
 }) {
   const request = await createClientRequest(data);
 
-  revalidatePath(`/projects/${data.projectId}/requests`);
+  revalidatePath(
+    `/projects/${data.projectId}/requests`,
+  );
+
   revalidatePath(
     `/projects/${data.projectId}/requests/${request.id}`,
   );
@@ -28,5 +34,61 @@ export async function createClientRequestAction(data: {
       request.analyzedAgainstBaselineId,
     baselineVersion: request.baselineVersion,
     status: request.status,
+  };
+}
+
+/**
+ * Ask Gemini to break the immutable original client message into
+ * independently analyzable asks.
+ *
+ * Nothing is persisted by this action.
+ */
+export async function decomposeClientRequestAction(data: {
+  projectId: string;
+  requestId: string;
+}) {
+  const request = await getClientRequest(
+    data.projectId,
+    data.requestId,
+  );
+
+  if (!request) {
+    throw new Error("Client request not found.");
+  }
+
+  if (request.items.length > 0) {
+    throw new Error(
+      "Atomic request items already exist for this case file.",
+    );
+  }
+
+  return decomposeClientRequestText(
+    request.originalText,
+  );
+}
+
+/**
+ * Persist the human-reviewed atomic request items.
+ */
+export async function saveClientRequestItemsAction(data: {
+  projectId: string;
+  requestId: string;
+  items: string[];
+}) {
+  const items = await saveClientRequestItems({
+    clientRequestId: data.requestId,
+    items: data.items,
+  });
+
+  revalidatePath(
+    `/projects/${data.projectId}/requests/${data.requestId}`,
+  );
+
+  revalidatePath(
+    `/projects/${data.projectId}/requests`,
+  );
+
+  return {
+    items,
   };
 }

@@ -39,14 +39,15 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="flex min-h-screen">
+    <div className="h-screen overflow-hidden bg-background">
+      <div className="flex h-full min-h-0">
         <Sidebar />
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 min-h-0 flex-1 flex-col">
           <Topbar />
 
-          <main className="min-w-0 flex-1">
+          {/* Only the workspace content scrolls; the global topbar remains fixed. */}
+          <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
             {children}
           </main>
         </div>

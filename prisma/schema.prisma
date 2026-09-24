@@ -305,6 +305,10 @@ model ClientRequest {
   // Preserve the original request wording exactly as captured.
   originalText String @db.Text
 
+  // Atomic asks extracted from this case file. The case remains the immutable
+  // source record; items are the independently analyzable decomposition.
+  items ClientRequestItem[]
+
   // NEW       = captured, analysis not yet run
   // ANALYZED  = decision engine has produced an analysis
   // REVIEW    = human review required
@@ -317,6 +321,34 @@ model ClientRequest {
   @@index([projectId, createdAt])
   @@index([analyzedAgainstBaselineId])
   @@index([status])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Client Request Item
+//
+// A ClientRequestItem is one atomic ask inside a ClientRequest case file.
+// It is deliberately limited to decomposition/persistence at this stage.
+// Classification, economics, recommendations, and outcomes are added later.
+// -----------------------------------------------------------------------------
+
+model ClientRequestItem {
+  id String @id @default(cuid())
+
+  clientRequestId String
+  clientRequest   ClientRequest @relation(fields: [clientRequestId], references: [id], onDelete: Cascade)
+
+  // Stable ordering within the case file. Positions are 1-based.
+  position Int
+
+  // Atomic wording used for independent analysis. The complete original client
+  // message remains preserved on ClientRequest.originalText as immutable evidence.
+  text String @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clientRequestId, position])
+  @@index([clientRequestId])
 }
 
 // -----------------------------------------------------------------------------
