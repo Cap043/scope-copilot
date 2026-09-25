@@ -1,0 +1,5435 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+app/
+  (dashboard)/
+    projects/
+      [projectId]/
+        requests/
+          [requestId]/
+            page.tsx
+          actions.ts
+components/
+  projects/
+    request/
+      request-analysis-panel.tsx
+lib/
+  ai/
+    request/
+      retrieve-scope-candidates.ts
+    gemini.ts
+    provider.ts
+  request-analysis.ts
+  requests.ts
+  scope-evidence.ts
+  scope-schema.ts
+  scope.ts
+tests/
+  request-analysis.test.ts
+  request-scope-candidates.test.ts
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="lib/ai/request/retrieve-scope-candidates.ts">
+import { geminiProvider } from "@/lib/ai/gemini";
+import {
+  parseStoredScope,
+  type NormalizedScope,
+} from "@/lib/scope-schema";
+
+export const SCOPE_CANDIDATE_RETRIEVAL_VERSION =
+  "semantic-retrieval-v1";
+
+export type ScopeCandidateRetrievalResult = {
+  scopeItemIds: string[];
+};
+
+type StandardScopeSection =
+  | "deliverables"
+  | "features"
+  | "exclusions"
+  | "clientResponsibilities";
+
+type StandardScopeItem =
+  NormalizedScope["deliverables"][number];
+
+type RevisionLimitScopeItem =
+  NormalizedScope["revisionLimits"][number];
+
+type AssumptionScopeItem =
+  NormalizedScope["assumptions"][number];
+
+export type ScopeCandidateEvidence = {
+  id: string;
+  section:
+    | "deliverables"
+    | "features"
+    | "exclusions"
+    | "clientResponsibilities"
+    | "revisionLimits"
+    | "assumptions";
+
+  title?: string;
+  description?: string;
+
+  type?: string;
+  limit?: string;
+
+  statement?: string;
+
+  sourceReferences: Array<{
+    quote: string;
+    section?: string;
+  }>;
+
+  provenance:
+    | StandardScopeItem["provenance"]
+    | RevisionLimitScopeItem["provenance"]
+    | AssumptionScopeItem["provenance"];
+
+  status: "active" | "removed";
+};
+
+const scopeCandidateRetrievalSchema = {
+  type: "object",
+  properties: {
+    scopeItemIds: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+    },
+  },
+  required: ["scopeItemIds"],
+} as const;
+
+const SYSTEM_INSTRUCTION = `
+You are the Scope Copilot Semantic Candidate Retrieval Engine.
+
+Your job is ONLY to identify which existing scope items from the supplied
+approved scope are potentially relevant to one atomic client request.
+
+You are a semantic retrieval engine, NOT a scope classifier or decision engine.
+
+Do NOT:
+- decide whether the request is in scope
+- decide whether it is out of scope
+- classify the request
+- estimate effort
+- estimate cost
+- recommend pricing
+- recommend an action
+- write a client response
+- invent scope items
+- modify scope items
+- create IDs
+- explain your reasoning in the output
+
+Your only output is the IDs of existing scope items that should be examined
+by a later scope-comparison engine.
+
+IMPORTANT RETRIEVAL PRINCIPLE:
+
+Optimize for RECALL, not precision.
+
+It is acceptable to return a scope item that later turns out to be irrelevant.
+It is NOT acceptable to omit a scope item merely because the client used
+different vocabulary from the approved scope.
+
+Look for semantic relationships, including:
+- equivalent concepts expressed using different terminology
+- implementation terminology versus user-facing terminology
+- broader/narrower concepts
+- related functionality
+- dependencies
+- potentially conflicting scope
+- explicit exclusions that may affect the request
+- client responsibilities that may affect the request
+- assumptions that may affect interpretation
+- revision limits that may be relevant
+
+Example:
+
+Client request:
+"Can users log in with their Google accounts?"
+
+Approved scope item:
+"OAuth2.0 Third-Party Authentication via Firebase."
+
+That scope item MUST be considered a semantic candidate even though the
+wording is different.
+
+Another example:
+
+Client request:
+"Can we add Stripe checkout?"
+
+A scope item mentioning "payment processing", "online payments", or
+"e-commerce checkout" may be relevant even if it does not contain the word
+"Stripe".
+
+Return ONLY IDs that actually exist in the supplied scope.
+
+Do not invent IDs.
+
+If no scope item appears potentially relevant, return an empty array.
+
+The complete approved scope is supplied to you because small agency scopes
+are intentionally compact. Do not assume that only the features section
+matters. Examine all independently identifiable scope sections.
+`;
+
+function normalizeCandidateIds(
+  value: unknown,
+): string[] {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    throw new Error(
+      "Semantic scope retrieval returned an invalid result.",
+    );
+  }
+
+  const scopeItemIds = (
+    value as {
+      scopeItemIds?: unknown;
+    }
+  ).scopeItemIds;
+
+  if (!Array.isArray(scopeItemIds)) {
+    throw new Error(
+      "Semantic scope retrieval did not return scope item IDs.",
+    );
+  }
+
+  const normalized = scopeItemIds.map(
+    (id) => {
+      if (typeof id !== "string") {
+        throw new Error(
+          "Semantic scope retrieval contains a non-text scope item ID.",
+        );
+      }
+
+      const normalizedId = id.trim();
+
+      if (!normalizedId) {
+        throw new Error(
+          "Semantic scope retrieval contains an empty scope item ID.",
+        );
+      }
+
+      return normalizedId;
+    },
+  );
+
+  const unique = new Set(normalized);
+
+  if (unique.size !== normalized.length) {
+    throw new Error(
+      "Semantic scope retrieval contains duplicate scope item IDs.",
+    );
+  }
+
+  return normalized;
+}
+
+export async function retrieveScopeCandidateIds(
+  input: {
+    clientRequestText: string;
+    approvedScope: unknown;
+  },
+): Promise<ScopeCandidateRetrievalResult> {
+  const clientRequestText =
+    input.clientRequestText.trim();
+
+  if (!clientRequestText) {
+    throw new Error(
+      "Client request cannot be empty.",
+    );
+  }
+
+  const parsedScope =
+    parseStoredScope(input.approvedScope);
+
+  if (!parsedScope.success) {
+    throw new Error(
+      "Approved scope structure is invalid.",
+    );
+  }
+
+  const result =
+    await geminiProvider.generateStructuredOutput<unknown>(
+      {
+        systemInstruction:
+          SYSTEM_INSTRUCTION,
+
+        userContent: [
+          "Atomic client request:",
+          "",
+          clientRequestText,
+          "",
+          "Complete approved scope:",
+          "",
+          JSON.stringify(
+            parsedScope.data,
+            null,
+            2,
+          ),
+        ].join("\n"),
+
+        schema:
+          scopeCandidateRetrievalSchema,
+      },
+    );
+
+  return {
+    scopeItemIds:
+      normalizeCandidateIds(result),
+  };
+}
+
+/**
+ * Resolve standard scope items into canonical evidence.
+ *
+ * The AI only returns IDs. This function is the deterministic bridge that
+ * resolves those IDs against the exact approved scope supplied by the caller.
+ */
+function resolveStandardItems(
+  section: StandardScopeSection,
+  items: StandardScopeItem[],
+  candidateIds: Set<string>,
+  candidatesById: Map<
+    string,
+    ScopeCandidateEvidence
+  >,
+) {
+  for (const item of items) {
+    if (candidatesById.has(item.id)) {
+      throw new Error(
+        `Approved scope contains duplicate scope item ID "${item.id}".`,
+      );
+    }
+
+    if (!candidateIds.has(item.id)) {
+      continue;
+    }
+
+    candidatesById.set(item.id, {
+      id: item.id,
+      section,
+      title: item.title,
+      description: item.description,
+      sourceReferences:
+        item.sourceReferences,
+      provenance: item.provenance,
+      status: item.status,
+    });
+  }
+}
+
+/**
+ * Resolve semantic candidate IDs against the canonical approved scope.
+ *
+ * This function never trusts the model's IDs blindly:
+ * - every returned ID must exist
+ * - every returned item comes from the supplied approved scope
+ * - canonical evidence is taken from the approved scope itself
+ * - no AI-generated wording becomes evidence
+ */
+export function resolveScopeCandidateIds(
+  approvedScope: NormalizedScope,
+  candidateIds: string[],
+): ScopeCandidateEvidence[] {
+  const candidatesById =
+    new Map<string, ScopeCandidateEvidence>();
+
+  const candidateIdSet =
+    new Set(candidateIds);
+
+  /*
+   * Standard scope sections.
+   *
+   * These all share the same persisted item shape:
+   * title + optional description + evidence + lifecycle metadata.
+   */
+  resolveStandardItems(
+    "deliverables",
+    approvedScope.deliverables,
+    candidateIdSet,
+    candidatesById,
+  );
+
+  resolveStandardItems(
+    "features",
+    approvedScope.features,
+    candidateIdSet,
+    candidatesById,
+  );
+
+  resolveStandardItems(
+    "exclusions",
+    approvedScope.exclusions,
+    candidateIdSet,
+    candidatesById,
+  );
+
+  resolveStandardItems(
+    "clientResponsibilities",
+    approvedScope.clientResponsibilities,
+    candidateIdSet,
+    candidatesById,
+  );
+
+  /*
+   * Revision limits have a different canonical shape:
+   * type + limit.
+   */
+  for (const item of approvedScope.revisionLimits) {
+    if (candidatesById.has(item.id)) {
+      throw new Error(
+        `Approved scope contains duplicate scope item ID "${item.id}".`,
+      );
+    }
+
+    if (!candidateIdSet.has(item.id)) {
+      continue;
+    }
+
+    candidatesById.set(item.id, {
+      id: item.id,
+      section: "revisionLimits",
+      type: item.type,
+      limit: item.limit,
+      sourceReferences:
+        item.sourceReferences,
+      provenance: item.provenance,
+      status: item.status,
+    });
+  }
+
+  /*
+   * Assumptions have another distinct canonical shape:
+   * statement.
+   */
+  for (const item of approvedScope.assumptions) {
+    if (candidatesById.has(item.id)) {
+      throw new Error(
+        `Approved scope contains duplicate scope item ID "${item.id}".`,
+      );
+    }
+
+    if (!candidateIdSet.has(item.id)) {
+      continue;
+    }
+
+    candidatesById.set(item.id, {
+      id: item.id,
+      section: "assumptions",
+      statement: item.statement,
+      sourceReferences:
+        item.sourceReferences,
+      provenance: item.provenance,
+      status: item.status,
+    });
+  }
+
+  /*
+   * Every model-returned ID must resolve.
+   *
+   * This is the critical deterministic safety boundary between AI retrieval
+   * and canonical application data.
+   */
+  const resolved: ScopeCandidateEvidence[] =
+    [];
+
+  for (const candidateId of candidateIds) {
+    const candidate =
+      candidatesById.get(candidateId);
+
+    if (!candidate) {
+      throw new Error(
+        `Semantic scope retrieval returned unknown scope item ID "${candidateId}".`,
+      );
+    }
+
+    resolved.push(candidate);
+  }
+
+  return resolved;
+}
+</file>
+
+<file path="lib/request-analysis.ts">
+import { prisma } from "@/lib/db";
+import { getCurrentOrganizationId } from "@/lib/auth-session";
+import type { Prisma } from "@/lib/generated/prisma/client";
+
+export const REQUEST_ANALYSIS_RUN_STATUSES = [
+  "PENDING",
+  "RUNNING",
+  "COMPLETED",
+  "FAILED",
+] as const;
+
+export type RequestAnalysisRunStatus =
+  (typeof REQUEST_ANALYSIS_RUN_STATUSES)[number];
+
+export type AnalysisResultSnapshot =
+  Prisma.InputJsonObject;
+
+type CreateRequestAnalysisRunInput = {
+  clientRequestItemId: string;
+  provider: string;
+  model: string;
+  promptVersion: string;
+  analysisVersion: string;
+};
+
+type CompleteRequestAnalysisRunInput = {
+  runId: string;
+  resultSnapshot: AnalysisResultSnapshot;
+};
+
+type FailRequestAnalysisRunInput = {
+  runId: string;
+  errorMessage: string;
+};
+
+/**
+ * Load a request item only when it belongs to the
+ * currently authenticated organization.
+ */
+async function getAuthorizedRequestItem(
+  clientRequestItemId: string,
+) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const item =
+    await prisma.clientRequestItem.findFirst({
+      where: {
+        id: clientRequestItemId,
+        clientRequest: {
+          project: {
+            organizationId,
+          },
+        },
+      },
+      include: {
+        clientRequest: {
+          include: {
+            project: true,
+          },
+        },
+      },
+    });
+
+  if (!item) {
+    throw new Error(
+      "Client request item not found.",
+    );
+  }
+
+  return {
+    organizationId,
+    item,
+  };
+}
+
+/**
+ * Load an analysis run only when its request item
+ * belongs to the currently authenticated organization.
+ */
+async function getAuthorizedAnalysisRun(
+  runId: string,
+) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const run =
+    await prisma.requestAnalysisRun.findFirst({
+      where: {
+        id: runId,
+        clientRequestItem: {
+          clientRequest: {
+            project: {
+              organizationId,
+            },
+          },
+        },
+      },
+      include: {
+        clientRequestItem: {
+          include: {
+            clientRequest: {
+              include: {
+                project: true,
+              },
+            },
+          },
+        },
+        scopeBaseline: true,
+      },
+    });
+
+  if (!run) {
+    throw new Error(
+      "Request analysis run not found.",
+    );
+  }
+
+  return {
+    organizationId,
+    run,
+  };
+}
+
+/**
+ * Create an analysis run for a client request item.
+ *
+ * The caller does not provide a scopeBaselineId.
+ * The exact baseline is derived from the parent
+ * ClientRequest's pinned approved baseline.
+ */
+export async function createRequestAnalysisRun(
+  input: CreateRequestAnalysisRunInput,
+) {
+  const { organizationId, item } =
+    await getAuthorizedRequestItem(
+      input.clientRequestItemId,
+    );
+
+  const pinnedBaselineId =
+    item.clientRequest.analyzedAgainstBaselineId;
+
+  const scopeBaseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        id: pinnedBaselineId,
+        projectId: item.clientRequest.projectId,
+        project: {
+          organizationId,
+        },
+      },
+    });
+
+  if (!scopeBaseline) {
+    throw new Error(
+      "Pinned scope baseline not found.",
+    );
+  }
+
+  if (scopeBaseline.status !== "APPROVED") {
+    throw new Error(
+      "Client request analysis must use an approved scope baseline.",
+    );
+  }
+
+  return prisma.requestAnalysisRun.create({
+    data: {
+      clientRequestItemId: item.id,
+      scopeBaselineId: scopeBaseline.id,
+      status: "PENDING",
+      provider: input.provider,
+      model: input.model,
+      promptVersion: input.promptVersion,
+      analysisVersion: input.analysisVersion,
+    },
+  });
+}
+
+/**
+ * Move a PENDING analysis run into RUNNING state.
+ */
+export async function startRequestAnalysisRun(
+  runId: string,
+) {
+  const { run } =
+    await getAuthorizedAnalysisRun(runId);
+
+  if (run.status !== "PENDING") {
+    throw new Error(
+      `Cannot start analysis run from ${run.status} state.`,
+    );
+  }
+
+  return prisma.requestAnalysisRun.update({
+    where: {
+      id: run.id,
+    },
+    data: {
+      status: "RUNNING",
+      startedAt: new Date(),
+    },
+  });
+}
+
+/**
+ * Persist the analysis result snapshot and complete
+ * the analysis run.
+ */
+export async function completeRequestAnalysisRun(
+  input: CompleteRequestAnalysisRunInput,
+) {
+  const { run } =
+    await getAuthorizedAnalysisRun(input.runId);
+
+  if (run.status !== "RUNNING") {
+    throw new Error(
+      `Cannot complete analysis run from ${run.status} state.`,
+    );
+  }
+
+  return prisma.requestAnalysisRun.update({
+    where: {
+      id: run.id,
+    },
+    data: {
+      status: "COMPLETED",
+      resultSnapshot: input.resultSnapshot,
+      completedAt: new Date(),
+      errorMessage: null,
+    },
+  });
+}
+
+/**
+ * Mark a running analysis as failed while preserving
+ * the failed run as an auditable historical record.
+ */
+export async function failRequestAnalysisRun(
+  input: FailRequestAnalysisRunInput,
+) {
+  const { run } =
+    await getAuthorizedAnalysisRun(input.runId);
+
+  if (run.status !== "RUNNING") {
+    throw new Error(
+      `Cannot fail analysis run from ${run.status} state.`,
+    );
+  }
+
+  return prisma.requestAnalysisRun.update({
+    where: {
+      id: run.id,
+    },
+    data: {
+      status: "FAILED",
+      errorMessage: input.errorMessage,
+    },
+  });
+}
+
+/**
+ * Get all analysis runs belonging to one request item.
+ *
+ * Newest runs are returned first.
+ */
+export async function getRequestAnalysisRuns(
+  clientRequestItemId: string,
+) {
+  await getAuthorizedRequestItem(
+    clientRequestItemId,
+  );
+
+  return prisma.requestAnalysisRun.findMany({
+    where: {
+      clientRequestItemId,
+    },
+    include: {
+      scopeBaseline: {
+        select: {
+          id: true,
+          version: true,
+          status: true,
+          projectId: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+}
+
+/**
+ * Get one analysis run together with its request item,
+ * parent request, project, and exact scope baseline.
+ */
+export async function getRequestAnalysisRun(
+  runId: string,
+) {
+  const { run } =
+    await getAuthorizedAnalysisRun(runId);
+
+  return run;
+}
+</file>
+
+<file path="tests/request-analysis.test.ts">
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+
+const {
+  getCurrentOrganizationId,
+} = vi.hoisted(() => ({
+  getCurrentOrganizationId:
+    vi.fn(),
+}));
+
+vi.mock("@/lib/auth-session", () => ({
+  getCurrentOrganizationId,
+}));
+
+import { prisma } from "@/lib/db";
+
+import {
+  completeRequestAnalysisRun,
+  createRequestAnalysisRun,
+  failRequestAnalysisRun,
+  getRequestAnalysisRun,
+  getRequestAnalysisRuns,
+  startRequestAnalysisRun,
+} from "@/lib/request-analysis";
+
+const createdOrganizationIds: string[] = [];
+const createdProjectIds: string[] = [];
+
+function uniqueId(prefix: string) {
+  return `${prefix}-${crypto.randomUUID()}`;
+}
+
+async function createTestOrganization() {
+  const id = uniqueId("analysis-test-org");
+
+  const organization =
+    await prisma.organization.create({
+      data: {
+        id,
+        name: `Analysis Test ${id}`,
+        slug: uniqueId(
+          "analysis-test-slug",
+        ),
+      },
+    });
+
+  createdOrganizationIds.push(
+    organization.id,
+  );
+
+  return organization;
+}
+
+async function createTestProject(
+  organizationId: string,
+) {
+  const client =
+    await prisma.client.create({
+      data: {
+        name: "Analysis Test Client",
+        organizationId,
+      },
+    });
+
+  const project =
+    await prisma.project.create({
+      data: {
+        name: `Analysis Test Project ${uniqueId(
+          "project",
+        )}`,
+        value: 10000,
+        organizationId,
+        clientId: client.id,
+      },
+    });
+
+  createdProjectIds.push(project.id);
+
+  return project;
+}
+
+async function createScopeBaseline(
+  projectId: string,
+  version: number,
+  status: string = "APPROVED",
+) {
+  return prisma.scopeBaseline.create({
+    data: {
+      projectId,
+      version,
+      status,
+      sourceType: "PASTE",
+      sourceText: `Test SOW version ${version}`,
+      structuredScope: {
+        deliverables: [],
+        features: [],
+        exclusions: [],
+        clientResponsibilities: [],
+        revisionLimits: [],
+        timeline: {
+          dependencies: [],
+          sourceReferences: [],
+        },
+        assumptions: [],
+      },
+      approvedAt:
+        status === "APPROVED"
+          ? new Date()
+          : undefined,
+    },
+  });
+}
+
+async function createTestRequest(
+  projectId: string,
+  baselineId: string,
+) {
+  return prisma.clientRequest.create({
+    data: {
+      projectId,
+      analyzedAgainstBaselineId:
+        baselineId,
+      originalText:
+        "Please add a customer dashboard.",
+      status: "NEW",
+    },
+  });
+}
+
+async function createTestRequestItem(
+  clientRequestId: string,
+) {
+  return prisma.clientRequestItem.create({
+    data: {
+      clientRequestId,
+      position: 1,
+      text: "Add a customer dashboard.",
+    },
+  });
+}
+
+describe("RequestAnalysisRun persistence", () => {
+  beforeEach(() => {
+    getCurrentOrganizationId.mockReset();
+  });
+
+  afterEach(async () => {
+    if (createdProjectIds.length > 0) {
+      /*
+       * Cleanup must follow the actual FK dependency graph:
+       *
+       * RequestAnalysisRun
+       *      ↓
+       * ClientRequestItem
+       *      ↓
+       * ClientRequest
+       *      ↓
+       * ScopeBaseline
+       *      ↓
+       * Project
+       */
+
+      await prisma.requestAnalysisRun.deleteMany({
+        where: {
+          clientRequestItem: {
+            clientRequest: {
+              projectId: {
+                in: createdProjectIds,
+              },
+            },
+          },
+        },
+      });
+
+      await prisma.clientRequestItem.deleteMany({
+        where: {
+          clientRequest: {
+            projectId: {
+              in: createdProjectIds,
+            },
+          },
+        },
+      });
+
+      await prisma.clientRequest.deleteMany({
+        where: {
+          projectId: {
+            in: createdProjectIds,
+          },
+        },
+      });
+
+      await prisma.scopeBaseline.deleteMany({
+        where: {
+          projectId: {
+            in: createdProjectIds,
+          },
+        },
+      });
+
+      await prisma.project.deleteMany({
+        where: {
+          id: {
+            in: createdProjectIds,
+          },
+        },
+      });
+    }
+
+    if (createdOrganizationIds.length > 0) {
+      await prisma.client.deleteMany({
+        where: {
+          organizationId: {
+            in: createdOrganizationIds,
+          },
+        },
+      });
+
+      await prisma.organization.deleteMany({
+        where: {
+          id: {
+            in: createdOrganizationIds,
+          },
+        },
+      });
+    }
+
+    createdProjectIds.length = 0;
+    createdOrganizationIds.length = 0;
+  });
+
+  it("creates an analysis run using the exact baseline pinned by the request", async () => {
+    const organization =
+      await createTestOrganization();
+
+    const project =
+      await createTestProject(
+        organization.id,
+      );
+
+    const baseline =
+      await createScopeBaseline(
+        project.id,
+        4,
+      );
+
+    const request =
+      await createTestRequest(
+        project.id,
+        baseline.id,
+      );
+
+    const item =
+      await createTestRequestItem(
+        request.id,
+      );
+
+    getCurrentOrganizationId.mockResolvedValue(
+      organization.id,
+    );
+
+    const run =
+      await createRequestAnalysisRun({
+        clientRequestItemId: item.id,
+        provider: "gemini",
+        model: "gemini-flash-lite-latest",
+        promptVersion:
+          "scope-comparison-v1",
+        analysisVersion:
+          "request-analysis-v1",
+      });
+
+    expect(run.id).toBeTruthy();
+
+    expect(
+      run.clientRequestItemId,
+    ).toBe(item.id);
+
+    expect(
+      run.scopeBaselineId,
+    ).toBe(baseline.id);
+
+    expect(run.status).toBe(
+      "PENDING",
+    );
+
+    expect(run.provider).toBe(
+      "gemini",
+    );
+
+    expect(run.model).toBe(
+      "gemini-flash-lite-latest",
+    );
+
+    expect(run.promptVersion).toBe(
+      "scope-comparison-v1",
+    );
+
+    expect(run.analysisVersion).toBe(
+      "request-analysis-v1",
+    );
+  });
+
+  it("does not allow a caller to choose a different baseline", async () => {
+    const organization =
+      await createTestOrganization();
+
+    const project =
+      await createTestProject(
+        organization.id,
+      );
+
+    const pinnedBaseline =
+      await createScopeBaseline(
+        project.id,
+        1,
+      );
+
+    const otherBaseline =
+      await createScopeBaseline(
+        project.id,
+        2,
+      );
+
+    const request =
+      await createTestRequest(
+        project.id,
+        pinnedBaseline.id,
+      );
+
+    const item =
+      await createTestRequestItem(
+        request.id,
+      );
+
+    getCurrentOrganizationId.mockResolvedValue(
+      organization.id,
+    );
+
+    const run =
+      await createRequestAnalysisRun({
+        clientRequestItemId: item.id,
+        provider: "gemini",
+        model: "test-model",
+        promptVersion:
+          "test-prompt-v1",
+        analysisVersion:
+          "test-analysis-v1",
+      });
+
+    expect(
+      run.scopeBaselineId,
+    ).toBe(pinnedBaseline.id);
+
+    expect(
+      run.scopeBaselineId,
+    ).not.toBe(otherBaseline.id);
+  });
+
+  it("refuses to create an analysis run when the pinned baseline is no longer approved", async () => {
+    const organization =
+      await createTestOrganization();
+
+    const project =
+      await createTestProject(
+        organization.id,
+      );
+
+    const baseline =
+      await createScopeBaseline(
+        project.id,
+        1,
+      );
+
+    const request =
+      await createTestRequest(
+        project.id,
+        baseline.id,
+      );
+
+    const item =
+      await createTestRequestItem(
+        request.id,
+      );
+
+    await prisma.scopeBaseline.update({
+      where: {
+        id: baseline.id,
+      },
+      data: {
+        status: "DRAFT",
+        approvedAt: null,
+      },
+    });
+
+    getCurrentOrganizationId.mockResolvedValue(
+      organization.id,
+    );
+
+    await expect(
+      createRequestAnalysisRun({
+        clientRequestItemId: item.id,
+        provider: "gemini",
+        model: "test-model",
+        promptVersion:
+          "test-prompt-v1",
+        analysisVersion:
+          "test-analysis-v1",
+      }),
+    ).rejects.toThrow(
+      "Client request analysis must use an approved scope baseline.",
+    );
+  });
+
+  it("runs through the PENDING to RUNNING to COMPLETED lifecycle", async () => {
+    const organization =
+      await createTestOrganization();
+
+    const project =
+      await createTestProject(
+        organization.id,
+      );
+
+    const baseline =
+      await createScopeBaseline(
+        project.id,
+        1,
+      );
+
+    const request =
+      await createTestRequest(
+        project.id,
+        baseline.id,
+      );
+
+    const item =
+      await createTestRequestItem(
+        request.id,
+      );
+
+    getCurrentOrganizationId.mockResolvedValue(
+      organization.id,
+    );
+
+    const createdRun =
+      await createRequestAnalysisRun({
+        clientRequestItemId: item.id,
+        provider: "gemini",
+        model: "test-model",
+        promptVersion:
+          "test-prompt-v1",
+        analysisVersion:
+          "test-analysis-v1",
+      });
+
+    expect(
+      createdRun.status,
+    ).toBe("PENDING");
+
+    const startedRun =
+      await startRequestAnalysisRun(
+        createdRun.id,
+      );
+
+    expect(
+      startedRun.status,
+    ).toBe("RUNNING");
+
+    expect(
+      startedRun.startedAt,
+    ).not.toBeNull();
+
+    const resultSnapshot = {
+      scopeRelationship:
+        "DIRECTLY_INCLUDED",
+      evidence: [
+        {
+          scopeItemId:
+            "feature-1",
+          reason:
+            "The approved scope already includes the dashboard.",
+        },
+      ],
+      confidence: "HIGH",
+    };
+
+    const completedRun =
+      await completeRequestAnalysisRun({
+        runId: createdRun.id,
+        resultSnapshot,
+      });
+
+    expect(
+      completedRun.status,
+    ).toBe("COMPLETED");
+
+    expect(
+      completedRun.completedAt,
+    ).not.toBeNull();
+
+    expect(
+      completedRun.resultSnapshot,
+    ).toEqual(resultSnapshot);
+
+    const storedRun =
+      await getRequestAnalysisRun(
+        createdRun.id,
+      );
+
+    expect(
+      storedRun.status,
+    ).toBe("COMPLETED");
+
+    expect(
+      storedRun.resultSnapshot,
+    ).toEqual(resultSnapshot);
+  });
+
+  it("runs through the PENDING to RUNNING to FAILED lifecycle", async () => {
+    const organization =
+      await createTestOrganization();
+
+    const project =
+      await createTestProject(
+        organization.id,
+      );
+
+    const baseline =
+      await createScopeBaseline(
+        project.id,
+        1,
+      );
+
+    const request =
+      await createTestRequest(
+        project.id,
+        baseline.id,
+      );
+
+    const item =
+      await createTestRequestItem(
+        request.id,
+      );
+
+    getCurrentOrganizationId.mockResolvedValue(
+      organization.id,
+    );
+
+    const createdRun =
+      await createRequestAnalysisRun({
+        clientRequestItemId: item.id,
+        provider: "gemini",
+        model: "test-model",
+        promptVersion:
+          "test-prompt-v1",
+        analysisVersion:
+          "test-analysis-v1",
+      });
+
+    await startRequestAnalysisRun(
+      createdRun.id,
+    );
+
+    const failedRun =
+      await failRequestAnalysisRun({
+        runId: createdRun.id,
+        errorMessage:
+          "Test analysis failure.",
+      });
+
+    expect(failedRun.status).toBe(
+      "FAILED",
+    );
+
+    expect(
+      failedRun.errorMessage,
+    ).toBe(
+      "Test analysis failure.",
+    );
+  });
+
+  it("rejects invalid lifecycle transitions", async () => {
+    const organization =
+      await createTestOrganization();
+
+    const project =
+      await createTestProject(
+        organization.id,
+      );
+
+    const baseline =
+      await createScopeBaseline(
+        project.id,
+        1,
+      );
+
+    const request =
+      await createTestRequest(
+        project.id,
+        baseline.id,
+      );
+
+    const item =
+      await createTestRequestItem(
+        request.id,
+      );
+
+    getCurrentOrganizationId.mockResolvedValue(
+      organization.id,
+    );
+
+    const run =
+      await createRequestAnalysisRun({
+        clientRequestItemId: item.id,
+        provider: "gemini",
+        model: "test-model",
+        promptVersion:
+          "test-prompt-v1",
+        analysisVersion:
+          "test-analysis-v1",
+      });
+
+    await expect(
+      completeRequestAnalysisRun({
+        runId: run.id,
+        resultSnapshot: {
+          test: true,
+        },
+      }),
+    ).rejects.toThrow(
+      "Cannot complete analysis run from PENDING state.",
+    );
+
+    await expect(
+      failRequestAnalysisRun({
+        runId: run.id,
+        errorMessage:
+          "Should not be allowed.",
+      }),
+    ).rejects.toThrow(
+      "Cannot fail analysis run from PENDING state.",
+    );
+
+    await startRequestAnalysisRun(
+      run.id,
+    );
+
+    await expect(
+      startRequestAnalysisRun(
+        run.id,
+      ),
+    ).rejects.toThrow(
+      "Cannot start analysis run from RUNNING state.",
+    );
+  });
+
+  it("returns analysis history newest first", async () => {
+    const organization =
+      await createTestOrganization();
+
+    const project =
+      await createTestProject(
+        organization.id,
+      );
+
+    const baseline =
+      await createScopeBaseline(
+        project.id,
+        1,
+      );
+
+    const request =
+      await createTestRequest(
+        project.id,
+        baseline.id,
+      );
+
+    const item =
+      await createTestRequestItem(
+        request.id,
+      );
+
+    getCurrentOrganizationId.mockResolvedValue(
+      organization.id,
+    );
+
+    const firstRun =
+      await createRequestAnalysisRun({
+        clientRequestItemId: item.id,
+        provider: "gemini",
+        model: "test-model",
+        promptVersion:
+          "test-prompt-v1",
+        analysisVersion:
+          "test-analysis-v1",
+      });
+
+    await startRequestAnalysisRun(
+      firstRun.id,
+    );
+
+    await completeRequestAnalysisRun({
+      runId: firstRun.id,
+      resultSnapshot: {
+        run: 1,
+      },
+    });
+
+    const secondRun =
+      await createRequestAnalysisRun({
+        clientRequestItemId: item.id,
+        provider: "gemini",
+        model: "test-model",
+        promptVersion:
+          "test-prompt-v2",
+        analysisVersion:
+          "test-analysis-v2",
+      });
+
+    const runs =
+      await getRequestAnalysisRuns(
+        item.id,
+      );
+
+    expect(runs).toHaveLength(2);
+
+    expect(runs[0].id).toBe(
+      secondRun.id,
+    );
+
+    expect(runs[1].id).toBe(
+      firstRun.id,
+    );
+  });
+
+  it("enforces organization isolation", async () => {
+    const organizationA =
+      await createTestOrganization();
+
+    const organizationB =
+      await createTestOrganization();
+
+    const projectA =
+      await createTestProject(
+        organizationA.id,
+      );
+
+    const baseline =
+      await createScopeBaseline(
+        projectA.id,
+        1,
+      );
+
+    const request =
+      await createTestRequest(
+        projectA.id,
+        baseline.id,
+      );
+
+    const item =
+      await createTestRequestItem(
+        request.id,
+      );
+
+    getCurrentOrganizationId.mockResolvedValue(
+      organizationA.id,
+    );
+
+    const run =
+      await createRequestAnalysisRun({
+        clientRequestItemId: item.id,
+        provider: "gemini",
+        model: "test-model",
+        promptVersion:
+          "test-prompt-v1",
+        analysisVersion:
+          "test-analysis-v1",
+      });
+
+    expect(run.id).toBeTruthy();
+
+    getCurrentOrganizationId.mockResolvedValue(
+      organizationB.id,
+    );
+
+    await expect(
+      getRequestAnalysisRun(
+        run.id,
+      ),
+    ).rejects.toThrow(
+      "Request analysis run not found.",
+    );
+
+    await expect(
+      getRequestAnalysisRuns(
+        item.id,
+      ),
+    ).rejects.toThrow(
+      "Client request item not found.",
+    );
+
+    await expect(
+      startRequestAnalysisRun(
+        run.id,
+      ),
+    ).rejects.toThrow(
+      "Request analysis run not found.",
+    );
+  });
+});
+</file>
+
+<file path="tests/request-scope-candidates.test.ts">
+import {
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+
+const {
+  generateStructuredOutput,
+} = vi.hoisted(() => ({
+  generateStructuredOutput:
+    vi.fn(),
+}));
+
+vi.mock("@/lib/ai/gemini", () => ({
+  geminiProvider: {
+    generateStructuredOutput,
+  },
+}));
+
+import {
+  resolveScopeCandidateIds,
+  retrieveScopeCandidateIds,
+} from "@/lib/ai/request/retrieve-scope-candidates";
+
+const approvedScope = {
+  deliverables: [
+    {
+      id: "deliverable-1",
+      title: "Customer portal",
+      description:
+        "A secure customer-facing portal.",
+      sourceReferences: [
+        {
+          quote:
+            "customer-facing portal",
+        },
+      ],
+      provenance: {
+        type: "document_extraction" as const,
+      },
+      status: "active" as const,
+    },
+  ],
+
+  features: [
+    {
+      id: "feature-oauth",
+      title:
+        "OAuth2.0 Third-Party Authentication via Firebase",
+      description:
+        "Users can authenticate through supported third-party providers using Firebase.",
+      sourceReferences: [
+        {
+          quote:
+            "OAuth2.0 Third-Party Authentication via Firebase",
+        },
+      ],
+      provenance: {
+        type: "document_extraction" as const,
+      },
+      status: "active" as const,
+    },
+    {
+      id: "feature-payments",
+      title: "Online payments",
+      description:
+        "Payment processing through an online payment provider.",
+      sourceReferences: [
+        {
+          quote:
+            "Payment processing through an online payment provider",
+        },
+      ],
+      provenance: {
+        type: "document_extraction" as const,
+      },
+      status: "active" as const,
+    },
+  ],
+
+  exclusions: [
+    {
+      id: "exclusion-third-party",
+      title:
+        "Additional third-party integrations",
+      description:
+        "Third-party integrations outside the listed authentication and payment functionality are excluded.",
+      sourceReferences: [
+        {
+          quote:
+            "Additional third-party integrations",
+        },
+      ],
+      provenance: {
+        type: "document_extraction" as const,
+      },
+      status: "active" as const,
+    },
+  ],
+
+  clientResponsibilities: [
+    {
+      id: "responsibility-content",
+      title: "Client content",
+      description:
+        "Client supplies final website content.",
+      sourceReferences: [
+        {
+          quote:
+            "Client supplies final website content",
+        },
+      ],
+      provenance: {
+        type: "document_extraction" as const,
+      },
+      status: "active" as const,
+    },
+  ],
+
+  revisionLimits: [
+    {
+      id: "revision-limit-1",
+      type: "design revisions",
+      limit: "Two rounds",
+      sourceReferences: [
+        {
+          quote:
+            "Two rounds",
+        },
+      ],
+      provenance: {
+        type: "document_extraction" as const,
+      },
+      status: "active" as const,
+    },
+  ],
+
+  timeline: {
+    dependencies: [],
+    sourceReferences: [],
+  },
+
+  assumptions: [
+    {
+      id: "assumption-1",
+      statement:
+        "Client will provide required credentials.",
+      sourceReferences: [
+        {
+          quote:
+            "Client will provide required credentials",
+        },
+      ],
+      provenance: {
+        type: "document_extraction" as const,
+      },
+      status: "active" as const,
+    },
+  ],
+};
+
+describe(
+  "semantic scope candidate retrieval",
+  () => {
+    it(
+      "returns only the scope IDs proposed by the semantic retrieval model",
+      async () => {
+        generateStructuredOutput.mockResolvedValueOnce(
+          {
+            scopeItemIds: [
+              "feature-oauth",
+              "exclusion-third-party",
+            ],
+          },
+        );
+
+        const result =
+          await retrieveScopeCandidateIds({
+            clientRequestText:
+              "Can users log in with their Google accounts?",
+            approvedScope,
+          });
+
+        expect(
+          result.scopeItemIds,
+        ).toEqual([
+          "feature-oauth",
+          "exclusion-third-party",
+        ]);
+
+        expect(
+          generateStructuredOutput,
+        ).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it(
+      "passes the complete approved scope to the AI retrieval layer",
+      async () => {
+        generateStructuredOutput.mockResolvedValueOnce(
+          {
+            scopeItemIds: [],
+          },
+        );
+
+        await retrieveScopeCandidateIds({
+          clientRequestText:
+            "Can users log in with Google?",
+          approvedScope,
+        });
+
+        const call =
+          generateStructuredOutput.mock.calls[0][0];
+
+        expect(
+          call.userContent,
+        ).toContain(
+          "Can users log in with Google?",
+        );
+
+        expect(
+          call.userContent,
+        ).toContain(
+          "OAuth2.0 Third-Party Authentication via Firebase",
+        );
+
+        expect(
+          call.userContent,
+        ).toContain(
+          "Online payments",
+        );
+
+        expect(
+          call.userContent,
+        ).toContain(
+          "Additional third-party integrations",
+        );
+
+        expect(
+          call.userContent,
+        ).toContain(
+          "Client supplies final website content",
+        );
+      },
+    );
+
+    it(
+      "rejects an empty client request",
+      async () => {
+        await expect(
+          retrieveScopeCandidateIds({
+            clientRequestText: "   ",
+            approvedScope,
+          }),
+        ).rejects.toThrow(
+          "Client request cannot be empty.",
+        );
+
+        expect(
+          generateStructuredOutput,
+        ).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "rejects an invalid approved scope",
+      async () => {
+        await expect(
+          retrieveScopeCandidateIds({
+            clientRequestText:
+              "Add Google login.",
+            approvedScope: {
+              invalid: true,
+            },
+          }),
+        ).rejects.toThrow(
+          "Approved scope structure is invalid.",
+        );
+
+        expect(
+          generateStructuredOutput,
+        ).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "rejects duplicate candidate IDs returned by the model",
+      async () => {
+        generateStructuredOutput.mockResolvedValueOnce(
+          {
+            scopeItemIds: [
+              "feature-oauth",
+              "feature-oauth",
+            ],
+          },
+        );
+
+        await expect(
+          retrieveScopeCandidateIds({
+            clientRequestText:
+              "Add Google login.",
+            approvedScope,
+          }),
+        ).rejects.toThrow(
+          "Semantic scope retrieval contains duplicate scope item IDs.",
+        );
+      },
+    );
+
+    it(
+      "rejects non-text candidate IDs",
+      async () => {
+        generateStructuredOutput.mockResolvedValueOnce(
+          {
+            scopeItemIds: [
+              "feature-oauth",
+              123,
+            ],
+          },
+        );
+
+        await expect(
+          retrieveScopeCandidateIds({
+            clientRequestText:
+              "Add Google login.",
+            approvedScope,
+          }),
+        ).rejects.toThrow(
+          "Semantic scope retrieval contains a non-text scope item ID.",
+        );
+      },
+    );
+
+    it(
+      "resolves valid IDs against the canonical approved scope",
+      () => {
+        const result =
+          resolveScopeCandidateIds(
+            approvedScope,
+            [
+              "feature-oauth",
+              "exclusion-third-party",
+            ],
+          );
+
+        expect(result).toHaveLength(2);
+
+        expect(result[0]).toEqual(
+          expect.objectContaining({
+            id: "feature-oauth",
+            section: "features",
+            title:
+              "OAuth2.0 Third-Party Authentication via Firebase",
+            status: "active",
+          }),
+        );
+
+        expect(result[1]).toEqual(
+          expect.objectContaining({
+            id: "exclusion-third-party",
+            section: "exclusions",
+            title:
+              "Additional third-party integrations",
+            status: "active",
+          }),
+        );
+      },
+    );
+
+    it(
+      "preserves canonical source evidence",
+      () => {
+        const result =
+          resolveScopeCandidateIds(
+            approvedScope,
+            ["feature-oauth"],
+          );
+
+        expect(
+          result[0].sourceReferences,
+        ).toEqual([
+          {
+            quote:
+              "OAuth2.0 Third-Party Authentication via Firebase",
+          },
+        ]);
+      },
+    );
+
+    it(
+      "rejects an ID that does not exist in the approved scope",
+      () => {
+        expect(() =>
+          resolveScopeCandidateIds(
+            approvedScope,
+            ["invented-scope-id"],
+          ),
+        ).toThrow(
+          'Semantic scope retrieval returned unknown scope item ID "invented-scope-id".',
+        );
+      },
+    );
+
+    it(
+      "preserves removed scope items instead of silently deleting them",
+      () => {
+        const scopeWithRemovedItem = {
+          ...approvedScope,
+          features: [
+            ...approvedScope.features,
+            {
+              id: "removed-feature",
+              title:
+                "Old authentication flow",
+              description:
+                "A previous authentication implementation.",
+              sourceReferences: [
+                {
+                  quote:
+                    "previous authentication implementation",
+                },
+              ],
+              provenance: {
+                type:
+                  "document_extraction" as const,
+              },
+              status:
+                "removed" as const,
+              removal: {
+                rationale:
+                  "Replaced by Firebase authentication.",
+                referenceId:
+                  "REV-4",
+              },
+            },
+          ],
+        };
+
+        const result =
+          resolveScopeCandidateIds(
+            scopeWithRemovedItem,
+            ["removed-feature"],
+          );
+
+        expect(
+          result[0],
+        ).toEqual(
+          expect.objectContaining({
+            id: "removed-feature",
+            status: "removed",
+          }),
+        );
+      },
+    );
+
+    it(
+      "supports revision-limit candidates",
+      () => {
+        const result =
+          resolveScopeCandidateIds(
+            approvedScope,
+            ["revision-limit-1"],
+          );
+
+        expect(result[0]).toEqual(
+          expect.objectContaining({
+            id: "revision-limit-1",
+            section: "revisionLimits",
+            type: "design revisions",
+            limit: "Two rounds",
+          }),
+        );
+      },
+    );
+
+    it(
+      "supports assumption candidates",
+      () => {
+        const result =
+          resolveScopeCandidateIds(
+            approvedScope,
+            ["assumption-1"],
+          );
+
+        expect(result[0]).toEqual(
+          expect.objectContaining({
+            id: "assumption-1",
+            section: "assumptions",
+            statement:
+              "Client will provide required credentials.",
+          }),
+        );
+      },
+    );
+
+    it(
+      "does not perform lexical filtering before semantic retrieval",
+      async () => {
+        generateStructuredOutput.mockResolvedValueOnce(
+          {
+            scopeItemIds: [
+              "feature-oauth",
+            ],
+          },
+        );
+
+        const result =
+          await retrieveScopeCandidateIds({
+            clientRequestText:
+              "Can users sign in with Google?",
+            approvedScope,
+          });
+
+        expect(
+          result.scopeItemIds,
+        ).toEqual([
+          "feature-oauth",
+        ]);
+
+        /*
+         * The application deliberately does not attempt to determine
+         * relevance from shared words. Gemini is responsible for the
+         * semantic recall step.
+         */
+        expect(
+          generateStructuredOutput,
+        ).toHaveBeenCalledTimes(1);
+      },
+    );
+  },
+);
+</file>
+
+<file path="components/projects/request/request-analysis-panel.tsx">
+import {
+  CircleHelp,
+  Clock3,
+  FileSearch,
+  GitCompareArrows,
+  ShieldCheck,
+} from "lucide-react";
+import type { ComponentType } from "react";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+type RequestAnalysisPanelProps = {
+  hasScopeBaseline: boolean;
+};
+
+export function RequestAnalysisPanel({
+  hasScopeBaseline,
+}: RequestAnalysisPanelProps) {
+  return (
+    <Card>
+      <CardHeader className="border-b px-5 py-4">
+        <div className="flex items-center gap-2">
+          <FileSearch className="size-4 text-muted-foreground" />
+          <CardTitle>How this request will be evaluated</CardTitle>
+        </div>
+      </CardHeader>
+
+      <CardContent className="p-5">
+        <div className="space-y-4">
+          <AnalysisStep
+            icon={GitCompareArrows}
+            title="Compare with approved scope"
+            description="Check whether the requested work is already covered by the project's agreed scope."
+            state={hasScopeBaseline ? "ready" : "blocked"}
+          />
+
+          <AnalysisStep
+            icon={ShieldCheck}
+            title="Identify affected scope"
+            description="Connect the request to the specific scope items, exclusions, assumptions, or limits it touches."
+            state={hasScopeBaseline ? "ready" : "blocked"}
+          />
+
+          <AnalysisStep
+            icon={Clock3}
+            title="Estimate effort and commercial impact"
+            description="Estimate additional work, internal cost, timeline impact, and the resulting margin effect."
+            state="upcoming"
+          />
+
+          <AnalysisStep
+            icon={CircleHelp}
+            title="Recommend the next action"
+            description="Surface an evidence-backed recommendation such as absorb, charge, swap, or defer."
+            state="upcoming"
+          />
+        </div>
+
+        {!hasScopeBaseline && (
+          <div className="mt-5 rounded-lg border border-warning/15 bg-warning/5 p-3.5">
+            <p className="text-sm font-medium">
+              A scope baseline is required before analysis.
+            </p>
+
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Define and approve the project scope first so this request has a
+              trusted reference point.
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AnalysisStep({
+  icon: Icon,
+  title,
+  description,
+  state,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
+  state: "ready" | "blocked" | "upcoming";
+}) {
+  const iconClassName =
+    state === "ready"
+      ? "bg-success/10 text-success"
+      : state === "blocked"
+        ? "bg-warning/10 text-warning"
+        : "bg-muted text-muted-foreground";
+
+  return (
+    <div className="flex items-start gap-3">
+      <div
+        className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${iconClassName}`}
+      >
+        <Icon className="size-4" />
+      </div>
+
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{title}</p>
+
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          {description}
+        </p>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="lib/ai/provider.ts">
+export type GenerateStructuredOutputParams = {
+  systemInstruction: string;
+  userContent: string;
+  schema: unknown;
+};
+
+export type AIProvider = {
+  generateStructuredOutput<T>(
+    params: GenerateStructuredOutputParams,
+  ): Promise<T>;
+};
+</file>
+
+<file path="lib/scope-evidence.ts">
+/**
+ * Resolves an LLM-generated evidence candidate back to the exact
+ * characters present in the original source text.
+ *
+ * The LLM may normalize whitespace, but the returned quote always
+ * comes from the original source text.
+ */
+
+/**
+ * Escapes regex-special characters so candidate text can safely
+ * be used inside a regular expression.
+ */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Resolves an LLM-generated evidence candidate against the original SOW.
+ *
+ * Exact matches are returned immediately.
+ *
+ * If the model normalized whitespace, the function performs a
+ * whitespace-insensitive lookup while preserving all other characters.
+ *
+ * Example:
+ *
+ * Candidate:
+ *   "trainer information"
+ *
+ * Source:
+ *   "trainer\ninformation, written content"
+ *
+ * Result:
+ *   "trainer\ninformation"
+ *
+ * Ambiguous matches are rejected instead of guessed.
+ */
+export function resolveSourceQuote(
+  candidateQuote: string,
+  sourceText: string,
+): string | null {
+  // Prefer an exact match whenever possible.
+  if (sourceText.includes(candidateQuote)) {
+    return candidateQuote;
+  }
+
+  const trimmedCandidate = candidateQuote.trim();
+
+  if (!trimmedCandidate) {
+    return null;
+  }
+
+  /*
+   * Allow one-or-more whitespace characters wherever the model
+   * had whitespace in its evidence.
+   *
+   * Everything else remains exact, including punctuation.
+   */
+  const parts = trimmedCandidate.split(/\s+/).map(escapeRegExp);
+  const pattern = parts.join("\\s+");
+  const regex = new RegExp(pattern, "g");
+
+  const matches: Array<{ start: number; end: number }> = [];
+
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(sourceText)) !== null) {
+    matches.push({
+      start: match.index,
+      end: match.index + match[0].length,
+    });
+
+    // Prevent an empty-match regex from looping forever.
+    if (match[0].length === 0) {
+      regex.lastIndex++;
+    }
+  }
+
+  // Never guess when the evidence could refer to multiple places.
+  if (matches.length !== 1) {
+    return null;
+  }
+
+  const matched = matches[0];
+
+  // CRITICAL: return characters from the ORIGINAL source.
+  return sourceText.slice(matched.start, matched.end);
+}
+</file>
+
+<file path="lib/ai/gemini.ts">
+import { GoogleGenAI } from "@google/genai";
+
+import type {
+  AIProvider,
+  GenerateStructuredOutputParams,
+} from "./provider";
+
+type GeminiClient = {
+  models: {
+    generateContent: (params: {
+      model: string;
+      contents: string;
+      config: {
+        systemInstruction: string;
+        responseMimeType: "application/json";
+        responseSchema: unknown;
+      };
+    }) => Promise<{
+      text?: string;
+    }>;
+  };
+};
+
+function createGeminiClient(): GeminiClient {
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not configured.");
+  }
+
+  return new GoogleGenAI({
+    apiKey,
+  });
+}
+
+export function createGeminiProvider(
+  client?: GeminiClient,
+): AIProvider {
+  return {
+    async generateStructuredOutput<T>({
+      systemInstruction,
+      userContent,
+      schema,
+    }: GenerateStructuredOutputParams): Promise<T> {
+      const geminiClient = client ?? createGeminiClient();
+
+      const response = await geminiClient.models.generateContent({
+        model: process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest",
+        // model: "gemini-flash-latest",
+        contents: userContent,
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: schema,
+        },
+      });
+
+      if (!response.text) {
+        throw new Error("Gemini returned an empty response.");
+      }
+
+      try {
+        return JSON.parse(response.text) as T;
+      } catch {
+        throw new Error("Gemini returned invalid JSON.");
+      }
+    },
+  };
+}
+
+export const geminiProvider = createGeminiProvider();
+</file>
+
+<file path="lib/scope-schema.ts">
+import { z } from "zod";
+
+const sourceReferenceSchema = z.object({
+  quote: z.string().min(1),
+  section: z.string().optional(),
+});
+
+/* -------------------------------------------------------------------------- */
+/* Extraction contract                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Gemini only extracts facts from the supplied SOW.
+ *
+ * It does not know about persistent IDs, amendments, or version lifecycle.
+ */
+const extractedScopeItemSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  sourceReferences: z.array(sourceReferenceSchema),
+});
+
+const extractedRevisionLimitSchema = z.object({
+  type: z.string().min(1),
+  limit: z.string().min(1),
+  sourceReferences: z.array(sourceReferenceSchema),
+});
+
+const extractedTimelineSchema = z.object({
+  duration: z.string().optional(),
+  startCondition: z.string().optional(),
+  dependencies: z.array(z.string()),
+  sourceReferences: z.array(sourceReferenceSchema),
+});
+
+const extractedAssumptionSchema = z.object({
+  statement: z.string().min(1),
+  sourceReferences: z.array(sourceReferenceSchema),
+});
+
+export const extractedScopeSchema = z.object({
+  deliverables: z.array(extractedScopeItemSchema),
+  features: z.array(extractedScopeItemSchema),
+  exclusions: z.array(extractedScopeItemSchema),
+  clientResponsibilities: z.array(extractedScopeItemSchema),
+  revisionLimits: z.array(extractedRevisionLimitSchema),
+  timeline: extractedTimelineSchema,
+  assumptions: z.array(extractedAssumptionSchema),
+});
+
+export type ExtractedScope = z.infer<
+  typeof extractedScopeSchema
+>;
+
+/* -------------------------------------------------------------------------- */
+/* Persisted scope contract                                                   */
+/* -------------------------------------------------------------------------- */
+
+const documentExtractionProvenanceSchema = z
+  .object({
+    type: z.literal("document_extraction"),
+  })
+  .strict();
+
+const manualAmendmentProvenanceSchema = z
+  .object({
+    type: z.literal("manual_amendment"),
+    rationale: z.string().trim().min(1),
+    referenceId: z.string().trim().min(1),
+  })
+  .strict();
+
+const provenanceSchema = z.discriminatedUnion("type", [
+  documentExtractionProvenanceSchema,
+  manualAmendmentProvenanceSchema,
+]);
+
+const amendmentSchema = z
+  .object({
+    rationale: z.string().trim().min(1),
+    referenceId: z.string().trim().min(1),
+  })
+  .strict();
+
+const removalSchema = z
+  .object({
+    rationale: z.string().trim().min(1),
+    referenceId: z.string().trim().min(1),
+  })
+  .strict();
+
+const persistedScopeItemBaseSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().optional(),
+
+  sourceReferences: z.array(sourceReferenceSchema),
+
+  provenance: provenanceSchema,
+
+  status: z.enum(["active", "removed"]),
+
+  amendment: amendmentSchema.optional(),
+
+  removal: removalSchema.optional(),
+});
+
+const persistedScopeItemSchema =
+  persistedScopeItemBaseSchema.superRefine(
+    (item, context) => {
+      if (
+        item.provenance.type ===
+          "document_extraction" &&
+        item.sourceReferences.length === 0
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sourceReferences"],
+          message:
+            "Document-extracted items must contain at least one source reference.",
+        });
+      }
+
+      if (
+        item.provenance.type ===
+          "manual_amendment" &&
+        item.sourceReferences.length > 0
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sourceReferences"],
+          message:
+            "Manual amendments cannot contain document source references.",
+        });
+      }
+
+      // A manually added item stores its rationale/reference directly
+      // inside provenance. A second amendment record would duplicate that
+      // same meaning.
+      if (
+        item.provenance.type ===
+          "manual_amendment" &&
+        item.amendment
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["amendment"],
+          message:
+            "Manual amendments cannot also contain amendment metadata.",
+        });
+      }
+
+      if (
+        item.status === "removed" &&
+        !item.removal
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["removal"],
+          message:
+            "Removed items must contain removal metadata.",
+        });
+      }
+
+      if (
+        item.status === "active" &&
+        item.removal
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["removal"],
+          message:
+            "Active items cannot contain removal metadata.",
+        });
+      }
+    },
+  );
+
+const persistedRevisionLimitSchema =
+  z
+    .object({
+      id: z.string().min(1),
+      type: z.string().min(1),
+      limit: z.string().min(1),
+
+      sourceReferences: z.array(
+        sourceReferenceSchema,
+      ),
+
+      provenance: provenanceSchema,
+
+      status: z.enum(["active", "removed"]),
+
+      amendment: amendmentSchema.optional(),
+
+      removal: removalSchema.optional(),
+    })
+    .superRefine((item, context) => {
+      if (
+        item.provenance.type ===
+          "document_extraction" &&
+        item.sourceReferences.length === 0
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sourceReferences"],
+          message:
+            "Document-extracted revision limits must contain at least one source reference.",
+        });
+      }
+
+      if (
+        item.provenance.type ===
+          "manual_amendment" &&
+        item.sourceReferences.length > 0
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sourceReferences"],
+          message:
+            "Manual revision-limit amendments cannot contain document source references.",
+        });
+      }
+
+      if (
+        item.provenance.type ===
+          "manual_amendment" &&
+        item.amendment
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["amendment"],
+          message:
+            "Manual amendments cannot also contain amendment metadata.",
+        });
+      }
+
+      if (
+        item.status === "removed" &&
+        !item.removal
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["removal"],
+          message:
+            "Removed revision limits must contain removal metadata.",
+        });
+      }
+
+      if (
+        item.status === "active" &&
+        item.removal
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["removal"],
+          message:
+            "Active revision limits cannot contain removal metadata.",
+        });
+      }
+    });
+
+const persistedAssumptionSchema = z
+  .object({
+    id: z.string().min(1),
+
+    statement: z.string().min(1),
+
+    sourceReferences: z.array(
+      sourceReferenceSchema,
+    ),
+
+    provenance: provenanceSchema,
+
+    status: z.enum([
+      "active",
+      "removed",
+    ]),
+
+    amendment: amendmentSchema.optional(),
+
+    removal: removalSchema.optional(),
+  })
+  .superRefine((item, context) => {
+    if (
+      item.provenance.type ===
+        "document_extraction" &&
+      item.sourceReferences.length === 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sourceReferences"],
+        message:
+          "Document-extracted assumptions must contain at least one source reference.",
+      });
+    }
+
+    if (
+      item.provenance.type ===
+        "manual_amendment" &&
+      item.sourceReferences.length > 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sourceReferences"],
+        message:
+          "Manual assumption amendments cannot contain document source references.",
+      });
+    }
+
+    if (
+      item.provenance.type ===
+        "manual_amendment" &&
+      item.amendment
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["amendment"],
+        message:
+          "Manual amendments cannot also contain amendment metadata.",
+      });
+    }
+
+    if (
+      item.status === "removed" &&
+      !item.removal
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["removal"],
+        message:
+          "Removed assumptions must contain removal metadata.",
+      });
+    }
+
+    if (
+      item.status === "active" &&
+      item.removal
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["removal"],
+        message:
+          "Active assumptions cannot contain removal metadata.",
+      });
+    }
+  });
+
+/* -------------------------------------------------------------------------- */
+/* Timeline                                                                   */
+/* -------------------------------------------------------------------------- */
+
+const persistedTimelineSchema = z
+  .object({
+    duration: z.string().optional(),
+    startCondition: z.string().optional(),
+    dependencies: z.array(z.string()),
+    sourceReferences: z.array(
+      sourceReferenceSchema,
+    ),
+
+    provenance: provenanceSchema.optional(),
+
+    amendment: amendmentSchema.optional(),
+  })
+  .superRefine((timeline, context) => {
+    const hasContent =
+      Boolean(timeline.duration?.trim()) ||
+      Boolean(
+        timeline.startCondition?.trim(),
+      ) ||
+      timeline.dependencies.length > 0 ||
+      timeline.sourceReferences.length > 0 ||
+      Boolean(timeline.provenance) ||
+      Boolean(timeline.amendment);
+
+    // Empty timeline is a valid extraction state.
+    if (!hasContent) {
+      return;
+    }
+
+    if (!timeline.provenance) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["provenance"],
+        message:
+          "Timeline content must declare provenance.",
+      });
+
+      return;
+    }
+
+    if (
+      timeline.provenance.type ===
+        "document_extraction" &&
+      timeline.sourceReferences.length === 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sourceReferences"],
+        message:
+          "Document-extracted timeline content must contain source evidence.",
+      });
+    }
+
+    if (
+      timeline.provenance.type ===
+        "manual_amendment" &&
+      timeline.sourceReferences.length > 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sourceReferences"],
+        message:
+          "Manual timeline amendments cannot contain document source references.",
+      });
+    }
+
+    if (
+      timeline.provenance.type ===
+        "manual_amendment" &&
+      timeline.amendment
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["amendment"],
+        message:
+          "Manual timeline amendments cannot also contain amendment metadata.",
+      });
+    }
+  });
+
+/* -------------------------------------------------------------------------- */
+/* Canonical persisted scope                                                   */
+/* -------------------------------------------------------------------------- */
+
+export const normalizedScopeSchema = z
+  .object({
+    deliverables: z.array(
+      persistedScopeItemSchema,
+    ),
+
+    features: z.array(
+      persistedScopeItemSchema,
+    ),
+
+    exclusions: z.array(
+      persistedScopeItemSchema,
+    ),
+
+    clientResponsibilities: z.array(
+      persistedScopeItemSchema,
+    ),
+
+    revisionLimits: z.array(
+      persistedRevisionLimitSchema,
+    ),
+
+    timeline: persistedTimelineSchema,
+
+    assumptions: z.array(
+      persistedAssumptionSchema,
+    ),
+  })
+  .superRefine((scope, context) => {
+    // IDs identify logical scope items. One ID must never represent
+    // two different items or two different scope categories.
+    const seenIds = new Map<string, string>();
+
+    const sections = [
+      ["deliverables", scope.deliverables],
+      ["features", scope.features],
+      ["exclusions", scope.exclusions],
+      [
+        "clientResponsibilities",
+        scope.clientResponsibilities,
+      ],
+      ["revisionLimits", scope.revisionLimits],
+      ["assumptions", scope.assumptions],
+    ] as const;
+
+    for (const [section, items] of sections) {
+      items.forEach((item, index) => {
+        const previousSection =
+          seenIds.get(item.id);
+
+        if (previousSection) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [section, index, "id"],
+            message:
+              `Item ID "${item.id}" is already used in ${previousSection}.`,
+          });
+
+          return;
+        }
+
+        seenIds.set(item.id, section);
+      });
+    }
+  });
+
+export type NormalizedScope = z.infer<
+  typeof normalizedScopeSchema
+>;
+
+/* -------------------------------------------------------------------------- */
+/* Legacy persisted-data compatibility                                        */
+/* -------------------------------------------------------------------------- */
+
+function stableHash(
+  value: string,
+  seed: number,
+): string {
+  let hash = seed >>> 0;
+
+  for (
+    let index = 0;
+    index < value.length;
+    index += 1
+  ) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0)
+    .toString(16)
+    .padStart(8, "0");
+}
+
+function createLegacyItemId(
+  category: string,
+  item: Record<string, unknown>,
+): string {
+  // Include category so identical evidence used in different old categories
+  // does not accidentally create the same logical item ID.
+  const fingerprint = JSON.stringify({
+    category,
+    title: item.title,
+    description: item.description,
+    statement: item.statement,
+    type: item.type,
+    limit: item.limit,
+    sourceReferences: item.sourceReferences,
+  });
+
+  return `legacy_${stableHash(
+    fingerprint,
+    2166136261,
+  )}_${stableHash(
+    fingerprint,
+    2246822519,
+  )}`;
+}
+
+function normalizeLegacyItem(
+  value: unknown,
+  category: string,
+): unknown {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return value;
+  }
+
+  const record = {
+    ...(value as Record<string, unknown>),
+  };
+
+  const sourceReferences = Array.isArray(
+    record.sourceReferences,
+  )
+    ? record.sourceReferences
+    : [];
+
+  // Old extracted items had source references but no provenance.
+  if (
+    !record.provenance &&
+    sourceReferences.length > 0
+  ) {
+    record.provenance = {
+      type: "document_extraction",
+    };
+  }
+
+  // Old extracted items were active by definition because removals
+  // did not exist in the previous contract.
+  if (
+    !record.status &&
+    record.provenance
+  ) {
+    record.status = "active";
+  }
+
+  // Backfill a deterministic identity for old document-derived items.
+  if (
+    !record.id &&
+    record.provenance &&
+    typeof record.provenance === "object" &&
+    (record.provenance as Record<string, unknown>)
+      .type === "document_extraction"
+  ) {
+    record.id = createLegacyItemId(
+      category,
+      record,
+    );
+  }
+
+  return record;
+}
+
+function normalizeLegacyTimeline(
+  value: unknown,
+): unknown {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return value;
+  }
+
+  const record = {
+    ...(value as Record<string, unknown>),
+  };
+
+  const sourceReferences = Array.isArray(
+    record.sourceReferences,
+  )
+    ? record.sourceReferences
+    : [];
+
+  if (
+    !record.provenance &&
+    sourceReferences.length > 0
+  ) {
+    record.provenance = {
+      type: "document_extraction",
+    };
+  }
+
+  return record;
+}
+
+/**
+ * Converts old ScopeBaseline JSON into the current persisted contract.
+ *
+ * This is for legacy database records only.
+ * New Gemini output does not pass through this path.
+ */
+export function normalizeLegacyScope(
+  value: unknown,
+): unknown {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    ...record,
+
+    deliverables: Array.isArray(
+      record.deliverables,
+    )
+      ? record.deliverables.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "deliverables",
+          ),
+        )
+      : record.deliverables,
+
+    features: Array.isArray(
+      record.features,
+    )
+      ? record.features.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "features",
+          ),
+        )
+      : record.features,
+
+    exclusions: Array.isArray(
+      record.exclusions,
+    )
+      ? record.exclusions.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "exclusions",
+          ),
+        )
+      : record.exclusions,
+
+    clientResponsibilities:
+      Array.isArray(
+        record.clientResponsibilities,
+      )
+        ? record.clientResponsibilities.map(
+            (item) =>
+              normalizeLegacyItem(
+                item,
+                "clientResponsibilities",
+              ),
+          )
+        : record.clientResponsibilities,
+
+    revisionLimits: Array.isArray(
+      record.revisionLimits,
+    )
+      ? record.revisionLimits.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "revisionLimits",
+          ),
+        )
+      : record.revisionLimits,
+
+    timeline: normalizeLegacyTimeline(
+      record.timeline,
+    ),
+
+    assumptions: Array.isArray(
+      record.assumptions,
+    )
+      ? record.assumptions.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "assumptions",
+          ),
+        )
+      : record.assumptions,
+  };
+}
+
+export function parseStoredScope(
+  value: unknown,
+) {
+  return normalizedScopeSchema.safeParse(
+    normalizeLegacyScope(value),
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Evidence validation                                                        */
+/* -------------------------------------------------------------------------- */
+
+export function validateExtractedScopeSourceReferences(
+  scope: ExtractedScope,
+  sourceText: string,
+): boolean {
+  const quotes: string[] = [];
+
+  const validateReferences = (
+    items: Array<{
+      sourceReferences: Array<{
+        quote: string;
+      }>;
+    }>,
+  ) => {
+    for (const item of items) {
+      if (
+        item.sourceReferences.length === 0
+      ) {
+        console.error(
+          "Extracted item has no source references.",
+        );
+
+        return false;
+      }
+
+      for (const reference of item.sourceReferences) {
+        if (
+          !sourceText.includes(
+            reference.quote,
+          )
+        ) {
+          console.error(
+            "Invalid source reference:",
+            JSON.stringify(reference.quote),
+          );
+
+          return false;
+        }
+
+        quotes.push(reference.quote);
+      }
+    }
+
+    return true;
+  };
+
+  if (
+    !validateReferences(scope.deliverables)
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(scope.features)
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(scope.exclusions)
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(
+      scope.clientResponsibilities,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(
+      scope.revisionLimits,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(scope.assumptions)
+  ) {
+    return false;
+  }
+
+  for (const reference of scope.timeline
+    .sourceReferences) {
+    if (
+      !sourceText.includes(
+        reference.quote,
+      )
+    ) {
+      console.error(
+        "Invalid timeline source reference:",
+        JSON.stringify(reference.quote),
+      );
+
+      return false;
+    }
+
+    quotes.push(reference.quote);
+  }
+
+  if (new Set(quotes).size !== quotes.length) {
+    const duplicates = quotes.filter(
+      (quote, index) =>
+        quotes.indexOf(quote) !== index,
+    );
+
+    console.error(
+      "Duplicate source references:",
+      [...new Set(duplicates)],
+    );
+
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Validate a persisted scope.
+ *
+ * Document-derived items must have real SOW evidence.
+ * Manual amendments intentionally have none.
+ */
+export function validateScopeSourceReferences(
+  scope: NormalizedScope,
+  sourceText: string,
+): boolean {
+  const quotes: string[] = [];
+
+  const validateReferences = (
+    items: Array<{
+      sourceReferences: Array<{
+        quote: string;
+      }>;
+      provenance: {
+        type:
+          | "document_extraction"
+          | "manual_amendment";
+      };
+    }>,
+  ) => {
+    for (const item of items) {
+      if (
+        item.provenance.type ===
+        "manual_amendment"
+      ) {
+        if (
+          item.sourceReferences.length > 0
+        ) {
+          console.error(
+            "Manual amendment contains document source references.",
+          );
+
+          return false;
+        }
+
+        continue;
+      }
+
+      if (
+        item.sourceReferences.length === 0
+      ) {
+        console.error(
+          "Document-extracted item has no source references.",
+        );
+
+        return false;
+      }
+
+      for (const reference of item.sourceReferences) {
+        if (
+          !sourceText.includes(
+            reference.quote,
+          )
+        ) {
+          console.error(
+            "Invalid source reference:",
+            JSON.stringify(reference.quote),
+          );
+
+          return false;
+        }
+
+        quotes.push(reference.quote);
+      }
+    }
+
+    return true;
+  };
+
+  if (
+    !validateReferences(scope.deliverables)
+  ) {
+    return false;
+  }
+
+  if (!validateReferences(scope.features)) {
+    return false;
+  }
+
+  if (!validateReferences(scope.exclusions)) {
+    return false;
+  }
+
+  if (
+    !validateReferences(
+      scope.clientResponsibilities,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(
+      scope.revisionLimits,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(scope.assumptions)
+  ) {
+    return false;
+  }
+
+  if (scope.timeline.provenance) {
+    if (
+      scope.timeline.provenance.type ===
+      "manual_amendment"
+    ) {
+      if (
+        scope.timeline.sourceReferences.length >
+        0
+      ) {
+        console.error(
+          "Manual timeline amendment contains document source references.",
+        );
+
+        return false;
+      }
+    } else {
+      if (
+        scope.timeline.sourceReferences.length ===
+        0
+      ) {
+        console.error(
+          "Document-extracted timeline has no source references.",
+        );
+
+        return false;
+      }
+
+      for (const reference of scope.timeline
+        .sourceReferences) {
+        if (
+          !sourceText.includes(
+            reference.quote,
+          )
+        ) {
+          console.error(
+            "Invalid timeline source reference:",
+            JSON.stringify(reference.quote),
+          );
+
+          return false;
+        }
+
+        quotes.push(reference.quote);
+      }
+    }
+  }
+
+  if (new Set(quotes).size !== quotes.length) {
+    const duplicates = quotes.filter(
+      (quote, index) =>
+        quotes.indexOf(quote) !== index,
+    );
+
+    console.error(
+      "Duplicate source references:",
+      [...new Set(duplicates)],
+    );
+
+    return false;
+  }
+
+  return true;
+}
+</file>
+
+<file path="app/(dashboard)/projects/[projectId]/requests/[requestId]/page.tsx">
+import {
+  CheckCircle2,
+  Clock3,
+} from "lucide-react";
+import { notFound } from "next/navigation";
+
+import { getClientRequest } from "@/lib/requests";
+
+import { ProjectWorkspaceHeader } from "@/components/projects/project-workspace-header";
+import { ProjectWorkspaceNav } from "@/components/projects/project-workspace-nav";
+import { RequestItemsPanel } from "@/components/projects/request/request-items-panel";
+import { RequestStatusBadge } from "@/components/projects/request/request-status-badge";
+import type { RequestStatus } from "@/components/projects/request/request-status-badge";
+
+interface RequestDetailPageProps {
+  params: Promise<{
+    projectId: string;
+    requestId: string;
+  }>;
+}
+
+function formatDate(date: Date) {
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export default async function RequestDetailPage({
+  params,
+}: RequestDetailPageProps) {
+  const {
+    projectId,
+    requestId,
+  } = await params;
+
+  const request = await getClientRequest(
+    projectId,
+    requestId,
+  );
+
+  if (!request) {
+    notFound();
+  }
+
+  const status =
+    request.status as RequestStatus;
+
+  return (
+    <div className="min-h-full">
+      <div className="mx-auto max-w-7xl px-5 py-5 sm:px-6 lg:px-8 lg:py-6">
+
+        {/* 
+         * Project-level context stays pinned while the request
+         * analysis workspace scrolls underneath it.
+         *
+         * Header + project navigation intentionally live in the
+         * same sticky container so they never separate while scrolling.
+         */}
+        <div className="sticky top-0 z-40 -mx-5 bg-background/95 px-5 pb-1 backdrop-blur-md sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+          <ProjectWorkspaceHeader
+            projectId={request.project.id}
+            projectName={request.project.name}
+            clientName={request.project.client.name}
+            value={request.project.value}
+            status="Active"
+          />
+
+          <ProjectWorkspaceNav
+            projectId={request.project.id}
+          />
+        </div>
+
+        <main className="mt-5">
+          {/* Request identity + compact scope context */}
+          <div className="flex flex-col gap-3 border-b border-border/70 pb-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">
+                  Request Analysis
+                </h2>
+
+                <RequestStatusBadge
+                  status={status}
+                />
+              </div>
+
+              <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+                Review the client request, break it into atomic asks,
+                and prepare it for scope analysis.
+              </p>
+            </div>
+
+            {/* Compact request metadata */}
+            <section
+              aria-label="Request context"
+              className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs"
+            >
+              <div className="flex items-center gap-2">
+                <div className="flex size-7 items-center justify-center rounded-md bg-primary/10">
+                  <CheckCircle2 className="size-3.5 text-primary" />
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-[0.07em] text-muted-foreground">
+                    Scope
+                  </p>
+
+                  <p className="font-semibold">
+                    Approved Scope v
+                    {
+                      request
+                        .analyzedAgainstBaseline
+                        .version
+                    }
+                  </p>
+                </div>
+              </div>
+
+              <div className="hidden h-7 w-px bg-border sm:block" />
+
+              <div className="flex items-center gap-2">
+                <div className="flex size-7 items-center justify-center rounded-md bg-muted">
+                  <Clock3 className="size-3.5 text-muted-foreground" />
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-[0.07em] text-muted-foreground">
+                    Captured
+                  </p>
+
+                  <p className="font-semibold">
+                    {formatDate(
+                      request.createdAt,
+                    )}
+                  </p>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          {/* 
+           * Immutable original client evidence.
+           * Collapsed by default so the analysis workspace gets
+           * the majority of the vertical space.
+           */}
+          <details className="group mt-4 rounded-xl border bg-card shadow-sm">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3.5 sm:px-5 [&::-webkit-details-marker]:hidden">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+                    Original client request
+                  </p>
+
+                  <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+                    Immutable evidence
+                  </span>
+                </div>
+
+                <p className="mt-1 truncate text-sm text-muted-foreground">
+                  {request.originalText}
+                </p>
+              </div>
+
+              <svg
+                className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <path
+                  d="m6 9 6 6 6-6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </summary>
+
+            <div className="border-t px-4 py-4 sm:px-5">
+              <div className="whitespace-pre-wrap break-words rounded-lg border bg-muted/20 p-4 text-sm leading-relaxed">
+                {request.originalText}
+              </div>
+            </div>
+          </details>
+
+          {/* Main request-analysis workspace */}
+          <div className="mt-4">
+            <RequestItemsPanel
+              projectId={request.project.id}
+              requestId={request.id}
+              items={request.items}
+            />
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="app/(dashboard)/projects/[projectId]/requests/actions.ts">
+"use server";
+
+import { revalidatePath } from "next/cache";
+
+import {
+  createClientRequest,
+  saveClientRequestItems,
+  getClientRequest,
+} from "@/lib/requests";
+
+import { decomposeClientRequestText } from "@/lib/ai/request/decompose";
+
+/**
+ * Server-side transport for request capture.
+ */
+export async function createClientRequestAction(data: {
+  projectId: string;
+  originalText: string;
+}) {
+  const request = await createClientRequest(data);
+
+  revalidatePath(
+    `/projects/${data.projectId}/requests`,
+  );
+
+  revalidatePath(
+    `/projects/${data.projectId}/requests/${request.id}`,
+  );
+
+  return {
+    id: request.id,
+    projectId: request.projectId,
+    analyzedAgainstBaselineId:
+      request.analyzedAgainstBaselineId,
+    baselineVersion: request.baselineVersion,
+    status: request.status,
+  };
+}
+
+/**
+ * Ask Gemini to break the immutable original client message into
+ * independently analyzable asks.
+ *
+ * Nothing is persisted by this action.
+ */
+export async function decomposeClientRequestAction(data: {
+  projectId: string;
+  requestId: string;
+}) {
+  const request = await getClientRequest(
+    data.projectId,
+    data.requestId,
+  );
+
+  if (!request) {
+    throw new Error("Client request not found.");
+  }
+
+  if (request.items.length > 0) {
+    throw new Error(
+      "Atomic request items already exist for this case file.",
+    );
+  }
+
+  return decomposeClientRequestText(
+    request.originalText,
+  );
+}
+
+/**
+ * Persist the human-reviewed atomic request items.
+ *
+ * The saved items are returned directly to the client so the
+ * current analysis workspace can transition without refreshing
+ * the entire Server Component tree.
+ */
+export async function saveClientRequestItemsAction(data: {
+  projectId: string;
+  requestId: string;
+  items: string[];
+}) {
+  const items = await saveClientRequestItems({
+    clientRequestId: data.requestId,
+    items: data.items,
+  });
+
+  // Keep future server renders and the request list fresh.
+  // The current client workspace does not need router.refresh().
+  revalidatePath(
+    `/projects/${data.projectId}/requests/${data.requestId}`,
+  );
+
+  revalidatePath(
+    `/projects/${data.projectId}/requests`,
+  );
+
+  return {
+    items: items.map((item) => ({
+      id: item.id,
+      position: item.position,
+      text: item.text,
+    })),
+  };
+}
+</file>
+
+<file path="lib/requests.ts">
+import { prisma } from "@/lib/db";
+import { getCurrentOrganizationId } from "@/lib/auth-session";
+
+export type ClientRequestStatus =
+  | "NEW"
+  | "ANALYZED"
+  | "REVIEW"
+  | "RESOLVED";
+
+/**
+ * Create a client request and pin it to the latest approved scope.
+ *
+ * The organization, project, baseline lookup, and request creation happen
+ * inside one transaction so the historical baseline choice is atomic.
+ */
+export async function createClientRequest(data: {
+  projectId: string;
+  originalText: string;
+}) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const projectId = data.projectId.trim();
+  const originalText = data.originalText;
+
+  if (!projectId) {
+    throw new Error("Project ID is required.");
+  }
+
+  if (!originalText.trim()) {
+    throw new Error("Client request cannot be empty.");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const project = await tx.project.findFirst({
+      where: {
+        id: projectId,
+        organizationId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!project) {
+      throw new Error("Project not found.");
+    }
+
+    const baseline = await tx.scopeBaseline.findFirst({
+      where: {
+        projectId: project.id,
+        status: "APPROVED",
+      },
+      orderBy: {
+        version: "desc",
+      },
+      select: {
+        id: true,
+        version: true,
+        status: true,
+      },
+    });
+
+    if (!baseline) {
+      throw new Error(
+        "An approved scope baseline is required before capturing a client request.",
+      );
+    }
+
+    const request = await tx.clientRequest.create({
+      data: {
+        projectId: project.id,
+        analyzedAgainstBaselineId: baseline.id,
+        originalText,
+        status: "NEW",
+      },
+      select: {
+        id: true,
+        projectId: true,
+        analyzedAgainstBaselineId: true,
+        originalText: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      ...request,
+      baselineVersion: baseline.version,
+    };
+  });
+}
+
+/**
+ * Load all client requests for a project.
+ *
+ * Organization ownership is checked server-side through the project relation.
+ */
+/**
+ * Load all client requests for a project.
+ *
+ * Organization ownership is checked server-side through the project relation.
+ *
+ * Only the atomic-item count is loaded here because the requests list
+ * does not need the full item records.
+ */
+export async function getClientRequests(projectId: string) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const safeProjectId = projectId.trim();
+
+  if (!safeProjectId) {
+    throw new Error("Project ID is required.");
+  }
+
+  return prisma.clientRequest.findMany({
+    where: {
+      projectId: safeProjectId,
+      project: {
+        organizationId,
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    select: {
+      id: true,
+      projectId: true,
+      originalText: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+
+      analyzedAgainstBaseline: {
+        select: {
+          id: true,
+          version: true,
+          status: true,
+        },
+      },
+
+      _count: {
+        select: {
+          items: true,
+        },
+      },
+    },
+  });
+}
+/**
+ * Load one request only when both the project and request belong to the
+ * authenticated organization.
+ */
+export async function getClientRequest(
+  projectId: string,
+  requestId: string,
+) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const safeProjectId = projectId.trim();
+  const safeRequestId = requestId.trim();
+
+  if (!safeProjectId || !safeRequestId) {
+    throw new Error(
+      "Project ID and request ID are required.",
+    );
+  }
+
+  return prisma.clientRequest.findFirst({
+    where: {
+      id: safeRequestId,
+      projectId: safeProjectId,
+      project: {
+        organizationId,
+      },
+    },
+    select: {
+      id: true,
+      projectId: true,
+      originalText: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+
+      analyzedAgainstBaseline: {
+        select: {
+          id: true,
+          version: true,
+          status: true,
+        },
+      },
+
+      items: {
+        orderBy: {
+          position: "asc",
+        },
+        select: {
+          id: true,
+          clientRequestId: true,
+          position: true,
+          text: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+
+      project: {
+        select: {
+          id: true,
+          name: true,
+          value: true,
+          client: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * Create one atomic ask inside an existing case file.
+ */
+export async function createClientRequestItem(data: {
+  clientRequestId: string;
+  position: number;
+  text: string;
+}) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const clientRequestId = data.clientRequestId.trim();
+  const text = data.text;
+
+  if (!clientRequestId) {
+    throw new Error("Client request ID is required.");
+  }
+
+  if (
+    !Number.isInteger(data.position) ||
+    data.position < 1
+  ) {
+    throw new Error(
+      "Client request item position must be a positive integer.",
+    );
+  }
+
+  if (!text.trim()) {
+    throw new Error(
+      "Client request item cannot be empty.",
+    );
+  }
+
+  const request = await prisma.clientRequest.findFirst({
+    where: {
+      id: clientRequestId,
+      project: {
+        organizationId,
+      },
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!request) {
+    throw new Error("Client request not found.");
+  }
+
+  return prisma.clientRequestItem.create({
+    data: {
+      clientRequestId: request.id,
+      position: data.position,
+      text,
+    },
+    select: {
+      id: true,
+      clientRequestId: true,
+      position: true,
+      text: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+/**
+ * Load atomic asks for a case file.
+ */
+export async function getClientRequestItems(
+  clientRequestId: string,
+) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const safeClientRequestId =
+    clientRequestId.trim();
+
+  if (!safeClientRequestId) {
+    throw new Error(
+      "Client request ID is required.",
+    );
+  }
+
+  return prisma.clientRequestItem.findMany({
+    where: {
+      clientRequestId: safeClientRequestId,
+      clientRequest: {
+        project: {
+          organizationId,
+        },
+      },
+    },
+    orderBy: {
+      position: "asc",
+    },
+    select: {
+      id: true,
+      clientRequestId: true,
+      position: true,
+      text: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+/**
+ * Persist the reviewed AI decomposition.
+ *
+ * Items can only be created when the case file currently has no items.
+ * This prevents silently replacing already-established analysis inputs.
+ */
+export async function saveClientRequestItems(data: {
+  clientRequestId: string;
+  items: string[];
+}) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const clientRequestId =
+    data.clientRequestId.trim();
+
+  if (!clientRequestId) {
+    throw new Error(
+      "Client request ID is required.",
+    );
+  }
+
+  if (
+    !Array.isArray(data.items) ||
+    data.items.length < 1 ||
+    data.items.length > 20
+  ) {
+    throw new Error(
+      "A request must contain between 1 and 20 atomic items.",
+    );
+  }
+
+  const normalizedItems = data.items.map(
+    (item) => {
+      if (typeof item !== "string") {
+        throw new Error(
+          "Atomic request items must be text.",
+        );
+      }
+
+      const text = item.trim();
+
+      if (!text) {
+        throw new Error(
+          "Atomic request items cannot be empty.",
+        );
+      }
+
+      if (text.length > 1000) {
+        throw new Error(
+          "Atomic request items cannot exceed 1000 characters.",
+        );
+      }
+
+      return text;
+    },
+  );
+
+  const uniqueItems = new Set(
+    normalizedItems.map((item) =>
+      item.toLowerCase(),
+    ),
+  );
+
+  if (
+    uniqueItems.size !==
+    normalizedItems.length
+  ) {
+    throw new Error(
+      "Atomic request items must be unique.",
+    );
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const request =
+      await tx.clientRequest.findFirst({
+        where: {
+          id: clientRequestId,
+          project: {
+            organizationId,
+          },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+    if (!request) {
+      throw new Error(
+        "Client request not found.",
+      );
+    }
+
+    const existingCount =
+      await tx.clientRequestItem.count({
+        where: {
+          clientRequestId: request.id,
+        },
+      });
+
+    if (existingCount > 0) {
+      throw new Error(
+        "Atomic request items already exist for this case file.",
+      );
+    }
+
+    await tx.clientRequestItem.createMany({
+      data: normalizedItems.map(
+        (text, index) => ({
+          clientRequestId: request.id,
+          position: index + 1,
+          text,
+        }),
+      ),
+    });
+
+    return tx.clientRequestItem.findMany({
+      where: {
+        clientRequestId: request.id,
+      },
+      orderBy: {
+        position: "asc",
+      },
+      select: {
+        id: true,
+        clientRequestId: true,
+        position: true,
+        text: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  });
+}
+</file>
+
+<file path="lib/scope.ts">
+import { randomUUID } from "node:crypto";
+
+import { prisma } from "@/lib/db";
+import { getCurrentOrganizationId } from "@/lib/auth-session";
+import { extractScope } from "@/lib/ai/scope/extract";
+
+import {
+  parseStoredScope,
+  validateScopeSourceReferences,
+  type ExtractedScope,
+  type NormalizedScope,
+} from "@/lib/scope-schema";
+
+/**
+ * These are the scope sections that contain independently identifiable
+ * items. Timeline is intentionally excluded because it is a singleton.
+ */
+export type ScopeArraySection =
+  | "deliverables"
+  | "features"
+  | "exclusions"
+  | "clientResponsibilities"
+  | "revisionLimits"
+  | "assumptions";
+
+type ScopeArrayItem =
+  NormalizedScope[ScopeArraySection][number];
+
+type StandardManualItemInput = {
+  title: string;
+  description?: string;
+};
+
+type RevisionLimitManualItemInput = {
+  type: string;
+  limit: string;
+};
+
+type AssumptionManualItemInput = {
+  statement: string;
+};
+
+type ManualItemInput =
+  | StandardManualItemInput
+  | RevisionLimitManualItemInput
+  | AssumptionManualItemInput;
+
+/**
+ * Gemini only returns extraction data.
+ *
+ * Persistent identity and lifecycle metadata belong to the application,
+ * so Gemini can never invent historical IDs or provenance.
+ */
+function materializeExtractedScope(
+  scope: ExtractedScope,
+): NormalizedScope {
+  const materializeItem = <
+    T extends {
+      title: string;
+      description?: string;
+      sourceReferences: Array<{
+        quote: string;
+        section?: string;
+      }>;
+    },
+  >(
+    item: T,
+  ) => ({
+    ...item,
+    id: randomUUID(),
+    provenance: {
+      type: "document_extraction" as const,
+    },
+    status: "active" as const,
+  });
+
+  const hasTimelineContent =
+    Boolean(scope.timeline.duration?.trim()) ||
+    Boolean(
+      scope.timeline.startCondition?.trim(),
+    ) ||
+    scope.timeline.dependencies.length > 0 ||
+    scope.timeline.sourceReferences.length > 0;
+
+  return {
+    deliverables:
+      scope.deliverables.map(
+        materializeItem,
+      ),
+
+    features:
+      scope.features.map(
+        materializeItem,
+      ),
+
+    exclusions:
+      scope.exclusions.map(
+        materializeItem,
+      ),
+
+    clientResponsibilities:
+      scope.clientResponsibilities.map(
+        materializeItem,
+      ),
+
+    revisionLimits:
+      scope.revisionLimits.map(
+        (item) => ({
+          ...item,
+          id: randomUUID(),
+          provenance: {
+            type:
+              "document_extraction" as const,
+          },
+          status: "active" as const,
+        }),
+      ),
+
+    timeline: {
+      ...scope.timeline,
+
+      ...(hasTimelineContent
+        ? {
+            provenance: {
+              type:
+                "document_extraction" as const,
+            },
+          }
+        : {}),
+    },
+
+    assumptions:
+      scope.assumptions.map(
+        (item) => ({
+          ...item,
+          id: randomUUID(),
+          provenance: {
+            type:
+              "document_extraction" as const,
+          },
+          status: "active" as const,
+        }),
+      ),
+  };
+}
+
+/**
+ * Resolve a draft baseline through the current organization and parse
+ * its persisted JSON into the canonical normalized representation.
+ *
+ * Every mutation in this file goes through this boundary first.
+ */
+async function getDraftBaseline(
+  baselineId: string,
+) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const baseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        id: baselineId,
+        project: {
+          organizationId,
+        },
+      },
+      select: {
+        id: true,
+        projectId: true,
+        status: true,
+        sourceText: true,
+        structuredScope: true,
+      },
+    });
+
+  if (!baseline) {
+    throw new Error(
+      "Scope baseline not found.",
+    );
+  }
+
+  if (baseline.status !== "DRAFT") {
+    throw new Error(
+      "Only draft scope baselines can be modified.",
+    );
+  }
+
+  const parsed = parseStoredScope(
+    baseline.structuredScope,
+  );
+
+  if (!parsed.success) {
+    throw new Error(
+      "Scope structure is invalid.",
+    );
+  }
+
+  if (
+    !validateScopeSourceReferences(
+      parsed.data,
+      baseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return {
+    ...baseline,
+    structuredScope: parsed.data,
+  };
+}
+
+/**
+ * Persist a fully validated scope mutation.
+ *
+ * We validate again immediately before writing so every mutation has the
+ * same evidence and structural guarantees as the approval boundary.
+ */
+async function persistDraftScope(
+  baseline: {
+    id: string;
+    sourceText: string;
+  },
+  scope: NormalizedScope,
+) {
+  if (
+    !validateScopeSourceReferences(
+      scope,
+      baseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return prisma.scopeBaseline.update({
+    where: {
+      id: baseline.id,
+    },
+    data: {
+      structuredScope: scope,
+    },
+  });
+}
+
+/**
+ * Find an item inside one of the array-based scope sections.
+ */
+function findScopeItem(
+  scope: NormalizedScope,
+  section: ScopeArraySection,
+  itemId: string,
+) {
+  const items =
+    scope[section] as ScopeArrayItem[];
+
+  const index = items.findIndex(
+    (item) => item.id === itemId,
+  );
+
+  if (index === -1) {
+    throw new Error(
+      "Scope item not found.",
+    );
+  }
+
+  return {
+    items,
+    index,
+    item: items[index],
+  };
+}
+
+/**
+ * Add a brand-new scope item manually.
+ *
+ * Manual additions never receive fake SOW evidence. Their provenance
+ * explicitly records why the agency accepted the addition.
+ */
+export async function addManualScopeItem(data: {
+  baselineId: string;
+  section: ScopeArraySection;
+  item: ManualItemInput;
+  rationale: string;
+  referenceId: string;
+}) {
+  const baseline =
+    await getDraftBaseline(
+      data.baselineId,
+    );
+
+  const rationale =
+    data.rationale.trim();
+
+  const referenceId =
+    data.referenceId.trim();
+
+  if (!rationale) {
+    throw new Error(
+      "Amendment rationale is required.",
+    );
+  }
+
+  if (!referenceId) {
+    throw new Error(
+      "Amendment reference is required.",
+    );
+  }
+
+  let newItem: ScopeArrayItem;
+
+  switch (data.section) {
+    case "deliverables":
+    case "features":
+    case "exclusions":
+    case "clientResponsibilities": {
+      const item =
+        data.item as StandardManualItemInput;
+
+      const title =
+        item.title.trim();
+
+      if (!title) {
+        throw new Error(
+          "Title cannot be empty.",
+        );
+      }
+
+      newItem = {
+        title,
+        description:
+          item.description?.trim() ||
+          undefined,
+        sourceReferences: [],
+        id: randomUUID(),
+        provenance: {
+          type: "manual_amendment",
+          rationale,
+          referenceId,
+        },
+        status: "active",
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    case "revisionLimits": {
+      const item =
+        data.item as RevisionLimitManualItemInput;
+
+      const type =
+        item.type.trim();
+
+      const limit =
+        item.limit.trim();
+
+      if (!type || !limit) {
+        throw new Error(
+          "Revision limit type and limit cannot be empty.",
+        );
+      }
+
+      newItem = {
+        type,
+        limit,
+        sourceReferences: [],
+        id: randomUUID(),
+        provenance: {
+          type: "manual_amendment",
+          rationale,
+          referenceId,
+        },
+        status: "active",
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    case "assumptions": {
+      const item =
+        data.item as AssumptionManualItemInput;
+
+      const statement =
+        item.statement.trim();
+
+      if (!statement) {
+        throw new Error(
+          "Assumption statement cannot be empty.",
+        );
+      }
+
+      newItem = {
+        statement,
+        sourceReferences: [],
+        id: randomUUID(),
+        provenance: {
+          type: "manual_amendment",
+          rationale,
+          referenceId,
+        },
+        status: "active",
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    default:
+      throw new Error(
+        "Unsupported scope section.",
+      );
+  }
+
+  const updatedScope = {
+    ...baseline.structuredScope,
+    [data.section]: [
+      ...(baseline.structuredScope[
+        data.section
+      ] as ScopeArrayItem[]),
+      newItem,
+    ],
+  } as NormalizedScope;
+
+  const updated =
+    await persistDraftScope(
+      baseline,
+      updatedScope,
+    );
+
+  return {
+    baseline: updated,
+    itemId: newItem.id,
+  };
+}
+
+/**
+ * Edit the meaning of an existing scope item.
+ *
+ * Document-derived items retain their original document provenance and
+ * receive amendment metadata. This preserves the distinction between
+ * "where the item came from" and "why its meaning changed".
+ *
+ * Manual items remain manual amendments. Their version-local provenance
+ * records the reason/reference for the latest manual change.
+ */
+export async function amendScopeItem(data: {
+  baselineId: string;
+  section: ScopeArraySection;
+  itemId: string;
+  changes:
+    | StandardManualItemInput
+    | RevisionLimitManualItemInput
+    | AssumptionManualItemInput;
+  rationale: string;
+  referenceId: string;
+}) {
+  const baseline =
+    await getDraftBaseline(
+      data.baselineId,
+    );
+
+  const rationale =
+    data.rationale.trim();
+
+  const referenceId =
+    data.referenceId.trim();
+
+  if (!rationale) {
+    throw new Error(
+      "Amendment rationale is required.",
+    );
+  }
+
+  if (!referenceId) {
+    throw new Error(
+      "Amendment reference is required.",
+    );
+  }
+
+  const {
+    items,
+    index,
+    item,
+  } = findScopeItem(
+    baseline.structuredScope,
+    data.section,
+    data.itemId,
+  );
+
+  if (item.status !== "active") {
+    throw new Error(
+      "Removed scope items cannot be amended.",
+    );
+  }
+
+  let updatedItem: ScopeArrayItem;
+
+  switch (data.section) {
+    case "deliverables":
+    case "features":
+    case "exclusions":
+    case "clientResponsibilities": {
+      const changes =
+        data.changes as StandardManualItemInput;
+
+      const title =
+        changes.title.trim();
+
+      if (!title) {
+        throw new Error(
+          "Title cannot be empty.",
+        );
+      }
+
+      updatedItem = {
+        ...item,
+        title,
+        description:
+          changes.description?.trim() ||
+          undefined,
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    case "revisionLimits": {
+      const changes =
+        data.changes as RevisionLimitManualItemInput;
+
+      const type =
+        changes.type.trim();
+
+      const limit =
+        changes.limit.trim();
+
+      if (!type || !limit) {
+        throw new Error(
+          "Revision limit type and limit cannot be empty.",
+        );
+      }
+
+      updatedItem = {
+        ...item,
+        type,
+        limit,
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    case "assumptions": {
+      const changes =
+        data.changes as AssumptionManualItemInput;
+
+      const statement =
+        changes.statement.trim();
+
+      if (!statement) {
+        throw new Error(
+          "Assumption statement cannot be empty.",
+        );
+      }
+
+      updatedItem = {
+        ...item,
+        statement,
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    default:
+      throw new Error(
+        "Unsupported scope section.",
+      );
+  }
+
+  // Evidence is immutable. A caller can change semantic fields but can
+  // never replace the original document evidence through this operation.
+  updatedItem.sourceReferences =
+    item.sourceReferences;
+
+  if (
+    item.provenance.type ===
+    "document_extraction"
+  ) {
+    updatedItem.provenance = {
+      type: "document_extraction",
+    };
+
+    updatedItem.amendment = {
+      rationale,
+      referenceId,
+    };
+  } else {
+    updatedItem.provenance = {
+      type: "manual_amendment",
+      rationale,
+      referenceId,
+    };
+
+    // Manual items keep their rationale/reference in provenance.
+    delete updatedItem.amendment;
+  }
+
+  updatedItem.status = "active";
+  delete updatedItem.removal;
+
+  items[index] = updatedItem;
+
+  const updatedScope = {
+    ...baseline.structuredScope,
+    [data.section]:
+      items,
+  } as NormalizedScope;
+
+  const updated =
+    await persistDraftScope(
+      baseline,
+      updatedScope,
+    );
+
+  return {
+    baseline: updated,
+    itemId: data.itemId,
+  };
+}
+
+/**
+ * Tombstone an item instead of deleting it from the version snapshot.
+ *
+ * The item retains its identity, provenance, and original evidence.
+ * Only its lifecycle state changes.
+ */
+export async function removeScopeItem(data: {
+  baselineId: string;
+  section: ScopeArraySection;
+  itemId: string;
+  rationale: string;
+  referenceId: string;
+}) {
+  const baseline =
+    await getDraftBaseline(
+      data.baselineId,
+    );
+
+  const rationale =
+    data.rationale.trim();
+
+  const referenceId =
+    data.referenceId.trim();
+
+  if (!rationale) {
+    throw new Error(
+      "Removal rationale is required.",
+    );
+  }
+
+  if (!referenceId) {
+    throw new Error(
+      "Removal reference is required.",
+    );
+  }
+
+  const {
+    items,
+    index,
+    item,
+  } = findScopeItem(
+    baseline.structuredScope,
+    data.section,
+    data.itemId,
+  );
+
+  if (item.status === "removed") {
+    throw new Error(
+      "Scope item is already removed.",
+    );
+  }
+
+  items[index] = {
+    ...item,
+    status: "removed",
+    removal: {
+      rationale,
+      referenceId,
+    },
+  } as ScopeArrayItem;
+
+  const updatedScope = {
+    ...baseline.structuredScope,
+    [data.section]:
+      items,
+  } as NormalizedScope;
+
+  const updated =
+    await persistDraftScope(
+      baseline,
+      updatedScope,
+    );
+
+  return {
+    baseline: updated,
+    itemId: data.itemId,
+  };
+}
+
+/**
+ * Timeline has no item ID because it is a singleton.
+ *
+ * Document-derived timeline content keeps its source evidence and receives
+ * amendment metadata when its meaning changes. Manual timeline changes use
+ * manual provenance and therefore carry no fake document evidence.
+ */
+export async function amendScopeTimeline(data: {
+  baselineId: string;
+  duration?: string;
+  startCondition?: string;
+  dependencies: string[];
+  rationale: string;
+  referenceId: string;
+}) {
+  const baseline =
+    await getDraftBaseline(
+      data.baselineId,
+    );
+
+  const rationale =
+    data.rationale.trim();
+
+  const referenceId =
+    data.referenceId.trim();
+
+  if (!rationale) {
+    throw new Error(
+      "Amendment rationale is required.",
+    );
+  }
+
+  if (!referenceId) {
+    throw new Error(
+      "Amendment reference is required.",
+    );
+  }
+
+  const duration =
+    data.duration?.trim() ||
+    undefined;
+
+  const startCondition =
+    data.startCondition?.trim() ||
+    undefined;
+
+  const dependencies =
+    data.dependencies
+      .map((dependency) =>
+        dependency.trim(),
+      )
+      .filter(Boolean);
+
+  if (
+    !duration &&
+    !startCondition &&
+    dependencies.length === 0
+  ) {
+    throw new Error(
+      "Timeline must contain at least one value.",
+    );
+  }
+
+  const timeline =
+    baseline.structuredScope.timeline;
+
+  const updatedTimeline = {
+    ...timeline,
+    duration,
+    startCondition,
+    dependencies,
+  };
+
+  if (
+    timeline.provenance?.type ===
+    "document_extraction"
+  ) {
+    updatedTimeline.provenance = {
+      type: "document_extraction",
+    };
+
+    updatedTimeline.amendment = {
+      rationale,
+      referenceId,
+    };
+  } else {
+    updatedTimeline.sourceReferences = [];
+
+    updatedTimeline.provenance = {
+      type: "manual_amendment",
+      rationale,
+      referenceId,
+    };
+
+    delete updatedTimeline.amendment;
+  }
+
+  const updatedScope = {
+    ...baseline.structuredScope,
+    timeline:
+      updatedTimeline,
+  } as NormalizedScope;
+
+  const updated =
+    await persistDraftScope(
+      baseline,
+      updatedScope,
+    );
+
+  return {
+    baseline: updated,
+  };
+}
+
+export async function createScopeBaseline(data: {
+  projectId: string;
+  sourceText: string;
+}) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const sourceText =
+    data.sourceText.trim();
+
+  if (!sourceText) {
+    throw new Error(
+      "Scope text cannot be empty.",
+    );
+  }
+
+  // Enforce organization ownership before processing or persisting scope.
+  const project =
+    await prisma.project.findFirst({
+      where: {
+        id: data.projectId,
+        organizationId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+  if (!project) {
+    throw new Error(
+      "Project not found.",
+    );
+  }
+
+  // Gemini performs document extraction only.
+  const extractedScope =
+    await extractScope(sourceText);
+
+  // The application assigns persistent identity and document provenance.
+  const structuredScope =
+    materializeExtractedScope(
+      extractedScope,
+    );
+
+  // The persisted scope must pass the same strict evidence validation
+  // before it becomes a database record.
+  if (
+    !validateScopeSourceReferences(
+      structuredScope,
+      sourceText,
+    )
+  ) {
+    throw new Error(
+      "Extracted scope contains invalid source references.",
+    );
+  }
+
+  const latestBaseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        projectId: project.id,
+      },
+      orderBy: {
+        version: "desc",
+      },
+      select: {
+        version: true,
+      },
+    });
+
+  const version =
+    (latestBaseline?.version ?? 0) + 1;
+
+  return prisma.scopeBaseline.create({
+    data: {
+      projectId: project.id,
+      version,
+      status: "DRAFT",
+      sourceType: "PASTE",
+      sourceText,
+      structuredScope,
+    },
+  });
+}
+
+export async function createScopeVersion(
+  projectId: string,
+) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const project =
+    await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        organizationId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+  if (!project) {
+    throw new Error(
+      "Project not found.",
+    );
+  }
+
+  // Always create the next version from the latest approved version.
+  const latestBaseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        projectId: project.id,
+      },
+      orderBy: {
+        version: "desc",
+      },
+      select: {
+        id: true,
+        version: true,
+        status: true,
+        sourceType: true,
+        sourceText: true,
+        structuredScope: true,
+      },
+    });
+
+  if (!latestBaseline) {
+    throw new Error(
+      "No scope baseline exists for this project.",
+    );
+  }
+
+  if (
+    latestBaseline.status !==
+    "APPROVED"
+  ) {
+    throw new Error(
+      "The current scope version must be approved before creating a new version.",
+    );
+  }
+
+  // Legacy approved records are normalized here while we migrate the
+  // database to the canonical persisted representation.
+  const parsed = parseStoredScope(
+    latestBaseline.structuredScope,
+  );
+
+  if (!parsed.success) {
+    throw new Error(
+      "Scope structure is invalid.",
+    );
+  }
+
+  const structuredScope =
+    parsed.data;
+
+  if (
+    !validateScopeSourceReferences(
+      structuredScope,
+      latestBaseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return prisma.scopeBaseline.create({
+    data: {
+      projectId: project.id,
+      version:
+        latestBaseline.version + 1,
+      status: "DRAFT",
+      sourceType:
+        latestBaseline.sourceType,
+      sourceText:
+        latestBaseline.sourceText,
+      // Copy the approved snapshot exactly. IDs and provenance therefore
+      // survive into the next version unless a later amendment changes them.
+      structuredScope,
+    },
+  });
+}
+
+export async function updateScopeBaseline(data: {
+  baselineId: string;
+  structuredScope: unknown;
+}) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const baseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        id: data.baselineId,
+        project: {
+          organizationId,
+        },
+      },
+      select: {
+        id: true,
+        status: true,
+        sourceText: true,
+      },
+    });
+
+  if (!baseline) {
+    throw new Error(
+      "Scope baseline not found.",
+    );
+  }
+
+  if (
+    baseline.status !== "DRAFT"
+  ) {
+    throw new Error(
+      "Only draft scope baselines can be edited.",
+    );
+  }
+
+  // Keep the existing generic persistence path temporarily for the
+  // current review UI. New amendment-aware UI operations should use
+  // addManualScopeItem/amendScopeItem/removeScopeItem/amendScopeTimeline.
+  const parsed = parseStoredScope(
+    data.structuredScope,
+  );
+
+  if (!parsed.success) {
+    throw new Error(
+      "Invalid scope structure.",
+    );
+  }
+
+  if (
+    !validateScopeSourceReferences(
+      parsed.data,
+      baseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return prisma.scopeBaseline.update({
+    where: {
+      id: baseline.id,
+    },
+    data: {
+      structuredScope: parsed.data,
+    },
+  });
+}
+
+export async function approveScopeBaseline(
+  baselineId: string,
+) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const baseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        id: baselineId,
+        project: {
+          organizationId,
+        },
+      },
+      select: {
+        id: true,
+        status: true,
+        sourceText: true,
+        structuredScope: true,
+      },
+    });
+
+  if (!baseline) {
+    throw new Error(
+      "Scope baseline not found.",
+    );
+  }
+
+  if (
+    baseline.status !==
+    "DRAFT"
+  ) {
+    throw new Error(
+      "Only draft scope baselines can be approved.",
+    );
+  }
+
+  const parsed = parseStoredScope(
+    baseline.structuredScope,
+  );
+
+  if (!parsed.success) {
+    throw new Error(
+      "Scope structure is invalid.",
+    );
+  }
+
+  if (
+    !validateScopeSourceReferences(
+      parsed.data,
+      baseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return prisma.scopeBaseline.update({
+    where: {
+      id: baseline.id,
+    },
+    data: {
+      status: "APPROVED",
+      approvedAt: new Date(),
+      structuredScope: parsed.data,
+    },
+  });
+}
+</file>
+
+</files>

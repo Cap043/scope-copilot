@@ -1,0 +1,3012 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+lib/
+  ai/
+    request/
+      decompose.ts
+    gemini-schema.ts
+    gemini.ts
+    provider.ts
+  request-analysis.ts
+  scope-evidence.ts
+  scope-schema.ts
+  scope.ts
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="lib/request-analysis.ts">
+import { prisma } from "@/lib/db";
+import { getCurrentOrganizationId } from "@/lib/auth-session";
+import type { Prisma } from "@/lib/generated/prisma/client";
+
+export const REQUEST_ANALYSIS_RUN_STATUSES = [
+  "PENDING",
+  "RUNNING",
+  "COMPLETED",
+  "FAILED",
+] as const;
+
+export type RequestAnalysisRunStatus =
+  (typeof REQUEST_ANALYSIS_RUN_STATUSES)[number];
+
+export type AnalysisResultSnapshot =
+  Prisma.InputJsonObject;
+
+type CreateRequestAnalysisRunInput = {
+  clientRequestItemId: string;
+  provider: string;
+  model: string;
+  promptVersion: string;
+  analysisVersion: string;
+};
+
+type CompleteRequestAnalysisRunInput = {
+  runId: string;
+  resultSnapshot: AnalysisResultSnapshot;
+};
+
+type FailRequestAnalysisRunInput = {
+  runId: string;
+  errorMessage: string;
+};
+
+/**
+ * Load a request item only when it belongs to the
+ * currently authenticated organization.
+ */
+async function getAuthorizedRequestItem(
+  clientRequestItemId: string,
+) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const item =
+    await prisma.clientRequestItem.findFirst({
+      where: {
+        id: clientRequestItemId,
+        clientRequest: {
+          project: {
+            organizationId,
+          },
+        },
+      },
+      include: {
+        clientRequest: {
+          include: {
+            project: true,
+          },
+        },
+      },
+    });
+
+  if (!item) {
+    throw new Error(
+      "Client request item not found.",
+    );
+  }
+
+  return {
+    organizationId,
+    item,
+  };
+}
+
+/**
+ * Load an analysis run only when its request item
+ * belongs to the currently authenticated organization.
+ */
+async function getAuthorizedAnalysisRun(
+  runId: string,
+) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const run =
+    await prisma.requestAnalysisRun.findFirst({
+      where: {
+        id: runId,
+        clientRequestItem: {
+          clientRequest: {
+            project: {
+              organizationId,
+            },
+          },
+        },
+      },
+      include: {
+        clientRequestItem: {
+          include: {
+            clientRequest: {
+              include: {
+                project: true,
+              },
+            },
+          },
+        },
+        scopeBaseline: true,
+      },
+    });
+
+  if (!run) {
+    throw new Error(
+      "Request analysis run not found.",
+    );
+  }
+
+  return {
+    organizationId,
+    run,
+  };
+}
+
+/**
+ * Create an analysis run for a client request item.
+ *
+ * The caller does not provide a scopeBaselineId.
+ * The exact baseline is derived from the parent
+ * ClientRequest's pinned approved baseline.
+ */
+export async function createRequestAnalysisRun(
+  input: CreateRequestAnalysisRunInput,
+) {
+  const { organizationId, item } =
+    await getAuthorizedRequestItem(
+      input.clientRequestItemId,
+    );
+
+  const pinnedBaselineId =
+    item.clientRequest.analyzedAgainstBaselineId;
+
+  const scopeBaseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        id: pinnedBaselineId,
+        projectId: item.clientRequest.projectId,
+        project: {
+          organizationId,
+        },
+      },
+    });
+
+  if (!scopeBaseline) {
+    throw new Error(
+      "Pinned scope baseline not found.",
+    );
+  }
+
+  if (scopeBaseline.status !== "APPROVED") {
+    throw new Error(
+      "Client request analysis must use an approved scope baseline.",
+    );
+  }
+
+  return prisma.requestAnalysisRun.create({
+    data: {
+      clientRequestItemId: item.id,
+      scopeBaselineId: scopeBaseline.id,
+      status: "PENDING",
+      provider: input.provider,
+      model: input.model,
+      promptVersion: input.promptVersion,
+      analysisVersion: input.analysisVersion,
+    },
+  });
+}
+
+/**
+ * Move a PENDING analysis run into RUNNING state.
+ */
+export async function startRequestAnalysisRun(
+  runId: string,
+) {
+  const { run } =
+    await getAuthorizedAnalysisRun(runId);
+
+  if (run.status !== "PENDING") {
+    throw new Error(
+      `Cannot start analysis run from ${run.status} state.`,
+    );
+  }
+
+  return prisma.requestAnalysisRun.update({
+    where: {
+      id: run.id,
+    },
+    data: {
+      status: "RUNNING",
+      startedAt: new Date(),
+    },
+  });
+}
+
+/**
+ * Persist the analysis result snapshot and complete
+ * the analysis run.
+ */
+export async function completeRequestAnalysisRun(
+  input: CompleteRequestAnalysisRunInput,
+) {
+  const { run } =
+    await getAuthorizedAnalysisRun(input.runId);
+
+  if (run.status !== "RUNNING") {
+    throw new Error(
+      `Cannot complete analysis run from ${run.status} state.`,
+    );
+  }
+
+  return prisma.requestAnalysisRun.update({
+    where: {
+      id: run.id,
+    },
+    data: {
+      status: "COMPLETED",
+      resultSnapshot: input.resultSnapshot,
+      completedAt: new Date(),
+      errorMessage: null,
+    },
+  });
+}
+
+/**
+ * Mark a running analysis as failed while preserving
+ * the failed run as an auditable historical record.
+ */
+export async function failRequestAnalysisRun(
+  input: FailRequestAnalysisRunInput,
+) {
+  const { run } =
+    await getAuthorizedAnalysisRun(input.runId);
+
+  if (run.status !== "RUNNING") {
+    throw new Error(
+      `Cannot fail analysis run from ${run.status} state.`,
+    );
+  }
+
+  return prisma.requestAnalysisRun.update({
+    where: {
+      id: run.id,
+    },
+    data: {
+      status: "FAILED",
+      errorMessage: input.errorMessage,
+    },
+  });
+}
+
+/**
+ * Get all analysis runs belonging to one request item.
+ *
+ * Newest runs are returned first.
+ */
+export async function getRequestAnalysisRuns(
+  clientRequestItemId: string,
+) {
+  await getAuthorizedRequestItem(
+    clientRequestItemId,
+  );
+
+  return prisma.requestAnalysisRun.findMany({
+    where: {
+      clientRequestItemId,
+    },
+    include: {
+      scopeBaseline: {
+        select: {
+          id: true,
+          version: true,
+          status: true,
+          projectId: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+}
+
+/**
+ * Get one analysis run together with its request item,
+ * parent request, project, and exact scope baseline.
+ */
+export async function getRequestAnalysisRun(
+  runId: string,
+) {
+  const { run } =
+    await getAuthorizedAnalysisRun(runId);
+
+  return run;
+}
+</file>
+
+<file path="lib/ai/request/decompose.ts">
+import { geminiProvider } from "@/lib/ai/gemini";
+
+export type AtomicRequestBreakdown = {
+  items: string[];
+};
+
+const atomicRequestGeminiSchema = {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+    },
+  },
+  required: ["items"],
+} as const;
+
+const SYSTEM_INSTRUCTION = `
+You are the Scope Copilot Atomic Request Breakdown Engine.
+
+Your job is to split one client request into the smallest useful set of
+independent client asks.
+
+You are NOT a scope classifier, pricing engine, or decision engine.
+
+Do not decide whether an ask is in scope.
+Do not estimate effort.
+Do not invent requirements.
+Do not add implementation details that the client did not request.
+
+Rules:
+
+1. Preserve the meaning of the client's original wording.
+2. Create one item for each independently analyzable client ask.
+3. If the message contains only one ask, return exactly one item.
+4. Split conjunctions when they represent separate pieces of work.
+5. Keep closely dependent wording together when splitting would change meaning.
+6. Each item must stand on its own without relying on another item's text.
+7. Do not create context-only items such as "the website" or "the project".
+8. Do not merge unrelated asks merely because they appear in the same sentence.
+9. Return concise request wording, not commentary.
+10. Return no empty items and no duplicate items.
+
+Example:
+
+Client request:
+"Add downloadable reports, change the hero video, and add Stripe."
+
+Items:
+- "Add downloadable reports."
+- "Change the hero video."
+- "Add Stripe."
+`;
+
+function normalizeItems(value: unknown): string[] {
+  if (!value || typeof value !== "object") {
+    throw new Error(
+      "Atomic request breakdown returned an invalid result.",
+    );
+  }
+
+  const items = (value as { items?: unknown }).items;
+
+  if (!Array.isArray(items)) {
+    throw new Error(
+      "Atomic request breakdown did not return an item list.",
+    );
+  }
+
+  if (items.length < 1 || items.length > 20) {
+    throw new Error(
+      "Atomic request breakdown must contain between 1 and 20 items.",
+    );
+  }
+
+  const normalized = items.map((item) => {
+    if (typeof item !== "string") {
+      throw new Error(
+        "Atomic request breakdown contains a non-text item.",
+      );
+    }
+
+    const text = item.trim();
+
+    if (!text) {
+      throw new Error(
+        "Atomic request breakdown contains an empty item.",
+      );
+    }
+
+    if (text.length > 1000) {
+      throw new Error(
+        "Atomic request breakdown contains an item that is too long.",
+      );
+    }
+
+    return text;
+  });
+
+  const unique = new Set(
+    normalized.map((item) => item.toLowerCase()),
+  );
+
+  if (unique.size !== normalized.length) {
+    throw new Error(
+      "Atomic request breakdown contains duplicate items.",
+    );
+  }
+
+  return normalized;
+}
+
+export async function decomposeClientRequestText(
+  originalText: string,
+): Promise<AtomicRequestBreakdown> {
+  if (!originalText.trim()) {
+    throw new Error("Client request cannot be empty.");
+  }
+
+  const result =
+    await geminiProvider.generateStructuredOutput<unknown>({
+      systemInstruction: SYSTEM_INSTRUCTION,
+      userContent: `Break down this client request into atomic asks:\n\n${originalText}`,
+      schema: atomicRequestGeminiSchema,
+    });
+
+  return {
+    items: normalizeItems(result),
+  };
+}
+</file>
+
+<file path="lib/ai/gemini-schema.ts">
+const sourceReferenceSchema = {
+  type: "object",
+  properties: {
+    quote: {
+      type: "string",
+    },
+    section: {
+      type: "string",
+    },
+  },
+  required: ["quote"],
+} as const;
+
+const scopeItemSchema = {
+  type: "object",
+  properties: {
+    title: {
+      type: "string",
+    },
+    description: {
+      type: "string",
+    },
+    sourceReferences: {
+      type: "array",
+      items: sourceReferenceSchema,
+    },
+  },
+  required: ["title", "sourceReferences"],
+} as const;
+
+const revisionLimitSchema = {
+  type: "object",
+  properties: {
+    type: {
+      type: "string",
+    },
+    limit: {
+      type: "string",
+    },
+    sourceReferences: {
+      type: "array",
+      items: sourceReferenceSchema,
+    },
+  },
+  required: ["type", "limit", "sourceReferences"],
+} as const;
+
+const timelineSchema = {
+  type: "object",
+  properties: {
+    duration: {
+      type: "string",
+    },
+    startCondition: {
+      type: "string",
+    },
+    dependencies: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+    },
+    sourceReferences: {
+      type: "array",
+      items: sourceReferenceSchema,
+    },
+  },
+  required: ["dependencies", "sourceReferences"],
+} as const;
+
+const assumptionSchema = {
+  type: "object",
+  properties: {
+    statement: {
+      type: "string",
+    },
+    sourceReferences: {
+      type: "array",
+      items: sourceReferenceSchema,
+    },
+  },
+  required: ["statement", "sourceReferences"],
+} as const;
+
+export const normalizedScopeGeminiSchema = {
+  type: "object",
+  properties: {
+    deliverables: {
+      type: "array",
+      items: scopeItemSchema,
+    },
+
+    features: {
+      type: "array",
+      items: scopeItemSchema,
+    },
+
+    exclusions: {
+      type: "array",
+      items: scopeItemSchema,
+    },
+
+    clientResponsibilities: {
+      type: "array",
+      items: scopeItemSchema,
+    },
+
+    revisionLimits: {
+      type: "array",
+      items: revisionLimitSchema,
+    },
+
+    timeline: timelineSchema,
+
+    assumptions: {
+      type: "array",
+      items: assumptionSchema,
+    },
+  },
+
+  required: [
+    "deliverables",
+    "features",
+    "exclusions",
+    "clientResponsibilities",
+    "revisionLimits",
+    "timeline",
+    "assumptions",
+  ],
+} as const;
+</file>
+
+<file path="lib/ai/provider.ts">
+export type GenerateStructuredOutputParams = {
+  systemInstruction: string;
+  userContent: string;
+  schema: unknown;
+};
+
+export type AIProvider = {
+  generateStructuredOutput<T>(
+    params: GenerateStructuredOutputParams,
+  ): Promise<T>;
+};
+</file>
+
+<file path="lib/scope-evidence.ts">
+/**
+ * Resolves an LLM-generated evidence candidate back to the exact
+ * characters present in the original source text.
+ *
+ * The LLM may normalize whitespace, but the returned quote always
+ * comes from the original source text.
+ */
+
+/**
+ * Escapes regex-special characters so candidate text can safely
+ * be used inside a regular expression.
+ */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Resolves an LLM-generated evidence candidate against the original SOW.
+ *
+ * Exact matches are returned immediately.
+ *
+ * If the model normalized whitespace, the function performs a
+ * whitespace-insensitive lookup while preserving all other characters.
+ *
+ * Example:
+ *
+ * Candidate:
+ *   "trainer information"
+ *
+ * Source:
+ *   "trainer\ninformation, written content"
+ *
+ * Result:
+ *   "trainer\ninformation"
+ *
+ * Ambiguous matches are rejected instead of guessed.
+ */
+export function resolveSourceQuote(
+  candidateQuote: string,
+  sourceText: string,
+): string | null {
+  // Prefer an exact match whenever possible.
+  if (sourceText.includes(candidateQuote)) {
+    return candidateQuote;
+  }
+
+  const trimmedCandidate = candidateQuote.trim();
+
+  if (!trimmedCandidate) {
+    return null;
+  }
+
+  /*
+   * Allow one-or-more whitespace characters wherever the model
+   * had whitespace in its evidence.
+   *
+   * Everything else remains exact, including punctuation.
+   */
+  const parts = trimmedCandidate.split(/\s+/).map(escapeRegExp);
+  const pattern = parts.join("\\s+");
+  const regex = new RegExp(pattern, "g");
+
+  const matches: Array<{ start: number; end: number }> = [];
+
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(sourceText)) !== null) {
+    matches.push({
+      start: match.index,
+      end: match.index + match[0].length,
+    });
+
+    // Prevent an empty-match regex from looping forever.
+    if (match[0].length === 0) {
+      regex.lastIndex++;
+    }
+  }
+
+  // Never guess when the evidence could refer to multiple places.
+  if (matches.length !== 1) {
+    return null;
+  }
+
+  const matched = matches[0];
+
+  // CRITICAL: return characters from the ORIGINAL source.
+  return sourceText.slice(matched.start, matched.end);
+}
+</file>
+
+<file path="lib/ai/gemini.ts">
+import { GoogleGenAI } from "@google/genai";
+
+import type {
+  AIProvider,
+  GenerateStructuredOutputParams,
+} from "./provider";
+
+type GeminiClient = {
+  models: {
+    generateContent: (params: {
+      model: string;
+      contents: string;
+      config: {
+        systemInstruction: string;
+        responseMimeType: "application/json";
+        responseSchema: unknown;
+      };
+    }) => Promise<{
+      text?: string;
+    }>;
+  };
+};
+
+function createGeminiClient(): GeminiClient {
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not configured.");
+  }
+
+  return new GoogleGenAI({
+    apiKey,
+  });
+}
+
+export function createGeminiProvider(
+  client?: GeminiClient,
+): AIProvider {
+  return {
+    async generateStructuredOutput<T>({
+      systemInstruction,
+      userContent,
+      schema,
+    }: GenerateStructuredOutputParams): Promise<T> {
+      const geminiClient = client ?? createGeminiClient();
+
+      const response = await geminiClient.models.generateContent({
+        model: process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest",
+        // model: "gemini-flash-latest",
+        contents: userContent,
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: schema,
+        },
+      });
+
+      if (!response.text) {
+        throw new Error("Gemini returned an empty response.");
+      }
+
+      try {
+        return JSON.parse(response.text) as T;
+      } catch {
+        throw new Error("Gemini returned invalid JSON.");
+      }
+    },
+  };
+}
+
+export const geminiProvider = createGeminiProvider();
+</file>
+
+<file path="lib/scope-schema.ts">
+import { z } from "zod";
+
+const sourceReferenceSchema = z.object({
+  quote: z.string().min(1),
+  section: z.string().optional(),
+});
+
+/* -------------------------------------------------------------------------- */
+/* Extraction contract                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Gemini only extracts facts from the supplied SOW.
+ *
+ * It does not know about persistent IDs, amendments, or version lifecycle.
+ */
+const extractedScopeItemSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  sourceReferences: z.array(sourceReferenceSchema),
+});
+
+const extractedRevisionLimitSchema = z.object({
+  type: z.string().min(1),
+  limit: z.string().min(1),
+  sourceReferences: z.array(sourceReferenceSchema),
+});
+
+const extractedTimelineSchema = z.object({
+  duration: z.string().optional(),
+  startCondition: z.string().optional(),
+  dependencies: z.array(z.string()),
+  sourceReferences: z.array(sourceReferenceSchema),
+});
+
+const extractedAssumptionSchema = z.object({
+  statement: z.string().min(1),
+  sourceReferences: z.array(sourceReferenceSchema),
+});
+
+export const extractedScopeSchema = z.object({
+  deliverables: z.array(extractedScopeItemSchema),
+  features: z.array(extractedScopeItemSchema),
+  exclusions: z.array(extractedScopeItemSchema),
+  clientResponsibilities: z.array(extractedScopeItemSchema),
+  revisionLimits: z.array(extractedRevisionLimitSchema),
+  timeline: extractedTimelineSchema,
+  assumptions: z.array(extractedAssumptionSchema),
+});
+
+export type ExtractedScope = z.infer<
+  typeof extractedScopeSchema
+>;
+
+/* -------------------------------------------------------------------------- */
+/* Persisted scope contract                                                   */
+/* -------------------------------------------------------------------------- */
+
+const documentExtractionProvenanceSchema = z
+  .object({
+    type: z.literal("document_extraction"),
+  })
+  .strict();
+
+const manualAmendmentProvenanceSchema = z
+  .object({
+    type: z.literal("manual_amendment"),
+    rationale: z.string().trim().min(1),
+    referenceId: z.string().trim().min(1),
+  })
+  .strict();
+
+const provenanceSchema = z.discriminatedUnion("type", [
+  documentExtractionProvenanceSchema,
+  manualAmendmentProvenanceSchema,
+]);
+
+const amendmentSchema = z
+  .object({
+    rationale: z.string().trim().min(1),
+    referenceId: z.string().trim().min(1),
+  })
+  .strict();
+
+const removalSchema = z
+  .object({
+    rationale: z.string().trim().min(1),
+    referenceId: z.string().trim().min(1),
+  })
+  .strict();
+
+const persistedScopeItemBaseSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().optional(),
+
+  sourceReferences: z.array(sourceReferenceSchema),
+
+  provenance: provenanceSchema,
+
+  status: z.enum(["active", "removed"]),
+
+  amendment: amendmentSchema.optional(),
+
+  removal: removalSchema.optional(),
+});
+
+const persistedScopeItemSchema =
+  persistedScopeItemBaseSchema.superRefine(
+    (item, context) => {
+      if (
+        item.provenance.type ===
+          "document_extraction" &&
+        item.sourceReferences.length === 0
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sourceReferences"],
+          message:
+            "Document-extracted items must contain at least one source reference.",
+        });
+      }
+
+      if (
+        item.provenance.type ===
+          "manual_amendment" &&
+        item.sourceReferences.length > 0
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sourceReferences"],
+          message:
+            "Manual amendments cannot contain document source references.",
+        });
+      }
+
+      // A manually added item stores its rationale/reference directly
+      // inside provenance. A second amendment record would duplicate that
+      // same meaning.
+      if (
+        item.provenance.type ===
+          "manual_amendment" &&
+        item.amendment
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["amendment"],
+          message:
+            "Manual amendments cannot also contain amendment metadata.",
+        });
+      }
+
+      if (
+        item.status === "removed" &&
+        !item.removal
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["removal"],
+          message:
+            "Removed items must contain removal metadata.",
+        });
+      }
+
+      if (
+        item.status === "active" &&
+        item.removal
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["removal"],
+          message:
+            "Active items cannot contain removal metadata.",
+        });
+      }
+    },
+  );
+
+const persistedRevisionLimitSchema =
+  z
+    .object({
+      id: z.string().min(1),
+      type: z.string().min(1),
+      limit: z.string().min(1),
+
+      sourceReferences: z.array(
+        sourceReferenceSchema,
+      ),
+
+      provenance: provenanceSchema,
+
+      status: z.enum(["active", "removed"]),
+
+      amendment: amendmentSchema.optional(),
+
+      removal: removalSchema.optional(),
+    })
+    .superRefine((item, context) => {
+      if (
+        item.provenance.type ===
+          "document_extraction" &&
+        item.sourceReferences.length === 0
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sourceReferences"],
+          message:
+            "Document-extracted revision limits must contain at least one source reference.",
+        });
+      }
+
+      if (
+        item.provenance.type ===
+          "manual_amendment" &&
+        item.sourceReferences.length > 0
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sourceReferences"],
+          message:
+            "Manual revision-limit amendments cannot contain document source references.",
+        });
+      }
+
+      if (
+        item.provenance.type ===
+          "manual_amendment" &&
+        item.amendment
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["amendment"],
+          message:
+            "Manual amendments cannot also contain amendment metadata.",
+        });
+      }
+
+      if (
+        item.status === "removed" &&
+        !item.removal
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["removal"],
+          message:
+            "Removed revision limits must contain removal metadata.",
+        });
+      }
+
+      if (
+        item.status === "active" &&
+        item.removal
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["removal"],
+          message:
+            "Active revision limits cannot contain removal metadata.",
+        });
+      }
+    });
+
+const persistedAssumptionSchema = z
+  .object({
+    id: z.string().min(1),
+
+    statement: z.string().min(1),
+
+    sourceReferences: z.array(
+      sourceReferenceSchema,
+    ),
+
+    provenance: provenanceSchema,
+
+    status: z.enum([
+      "active",
+      "removed",
+    ]),
+
+    amendment: amendmentSchema.optional(),
+
+    removal: removalSchema.optional(),
+  })
+  .superRefine((item, context) => {
+    if (
+      item.provenance.type ===
+        "document_extraction" &&
+      item.sourceReferences.length === 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sourceReferences"],
+        message:
+          "Document-extracted assumptions must contain at least one source reference.",
+      });
+    }
+
+    if (
+      item.provenance.type ===
+        "manual_amendment" &&
+      item.sourceReferences.length > 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sourceReferences"],
+        message:
+          "Manual assumption amendments cannot contain document source references.",
+      });
+    }
+
+    if (
+      item.provenance.type ===
+        "manual_amendment" &&
+      item.amendment
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["amendment"],
+        message:
+          "Manual amendments cannot also contain amendment metadata.",
+      });
+    }
+
+    if (
+      item.status === "removed" &&
+      !item.removal
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["removal"],
+        message:
+          "Removed assumptions must contain removal metadata.",
+      });
+    }
+
+    if (
+      item.status === "active" &&
+      item.removal
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["removal"],
+        message:
+          "Active assumptions cannot contain removal metadata.",
+      });
+    }
+  });
+
+/* -------------------------------------------------------------------------- */
+/* Timeline                                                                   */
+/* -------------------------------------------------------------------------- */
+
+const persistedTimelineSchema = z
+  .object({
+    duration: z.string().optional(),
+    startCondition: z.string().optional(),
+    dependencies: z.array(z.string()),
+    sourceReferences: z.array(
+      sourceReferenceSchema,
+    ),
+
+    provenance: provenanceSchema.optional(),
+
+    amendment: amendmentSchema.optional(),
+  })
+  .superRefine((timeline, context) => {
+    const hasContent =
+      Boolean(timeline.duration?.trim()) ||
+      Boolean(
+        timeline.startCondition?.trim(),
+      ) ||
+      timeline.dependencies.length > 0 ||
+      timeline.sourceReferences.length > 0 ||
+      Boolean(timeline.provenance) ||
+      Boolean(timeline.amendment);
+
+    // Empty timeline is a valid extraction state.
+    if (!hasContent) {
+      return;
+    }
+
+    if (!timeline.provenance) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["provenance"],
+        message:
+          "Timeline content must declare provenance.",
+      });
+
+      return;
+    }
+
+    if (
+      timeline.provenance.type ===
+        "document_extraction" &&
+      timeline.sourceReferences.length === 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sourceReferences"],
+        message:
+          "Document-extracted timeline content must contain source evidence.",
+      });
+    }
+
+    if (
+      timeline.provenance.type ===
+        "manual_amendment" &&
+      timeline.sourceReferences.length > 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sourceReferences"],
+        message:
+          "Manual timeline amendments cannot contain document source references.",
+      });
+    }
+
+    if (
+      timeline.provenance.type ===
+        "manual_amendment" &&
+      timeline.amendment
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["amendment"],
+        message:
+          "Manual timeline amendments cannot also contain amendment metadata.",
+      });
+    }
+  });
+
+/* -------------------------------------------------------------------------- */
+/* Canonical persisted scope                                                   */
+/* -------------------------------------------------------------------------- */
+
+export const normalizedScopeSchema = z
+  .object({
+    deliverables: z.array(
+      persistedScopeItemSchema,
+    ),
+
+    features: z.array(
+      persistedScopeItemSchema,
+    ),
+
+    exclusions: z.array(
+      persistedScopeItemSchema,
+    ),
+
+    clientResponsibilities: z.array(
+      persistedScopeItemSchema,
+    ),
+
+    revisionLimits: z.array(
+      persistedRevisionLimitSchema,
+    ),
+
+    timeline: persistedTimelineSchema,
+
+    assumptions: z.array(
+      persistedAssumptionSchema,
+    ),
+  })
+  .superRefine((scope, context) => {
+    // IDs identify logical scope items. One ID must never represent
+    // two different items or two different scope categories.
+    const seenIds = new Map<string, string>();
+
+    const sections = [
+      ["deliverables", scope.deliverables],
+      ["features", scope.features],
+      ["exclusions", scope.exclusions],
+      [
+        "clientResponsibilities",
+        scope.clientResponsibilities,
+      ],
+      ["revisionLimits", scope.revisionLimits],
+      ["assumptions", scope.assumptions],
+    ] as const;
+
+    for (const [section, items] of sections) {
+      items.forEach((item, index) => {
+        const previousSection =
+          seenIds.get(item.id);
+
+        if (previousSection) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [section, index, "id"],
+            message:
+              `Item ID "${item.id}" is already used in ${previousSection}.`,
+          });
+
+          return;
+        }
+
+        seenIds.set(item.id, section);
+      });
+    }
+  });
+
+export type NormalizedScope = z.infer<
+  typeof normalizedScopeSchema
+>;
+
+/* -------------------------------------------------------------------------- */
+/* Legacy persisted-data compatibility                                        */
+/* -------------------------------------------------------------------------- */
+
+function stableHash(
+  value: string,
+  seed: number,
+): string {
+  let hash = seed >>> 0;
+
+  for (
+    let index = 0;
+    index < value.length;
+    index += 1
+  ) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0)
+    .toString(16)
+    .padStart(8, "0");
+}
+
+function createLegacyItemId(
+  category: string,
+  item: Record<string, unknown>,
+): string {
+  // Include category so identical evidence used in different old categories
+  // does not accidentally create the same logical item ID.
+  const fingerprint = JSON.stringify({
+    category,
+    title: item.title,
+    description: item.description,
+    statement: item.statement,
+    type: item.type,
+    limit: item.limit,
+    sourceReferences: item.sourceReferences,
+  });
+
+  return `legacy_${stableHash(
+    fingerprint,
+    2166136261,
+  )}_${stableHash(
+    fingerprint,
+    2246822519,
+  )}`;
+}
+
+function normalizeLegacyItem(
+  value: unknown,
+  category: string,
+): unknown {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return value;
+  }
+
+  const record = {
+    ...(value as Record<string, unknown>),
+  };
+
+  const sourceReferences = Array.isArray(
+    record.sourceReferences,
+  )
+    ? record.sourceReferences
+    : [];
+
+  // Old extracted items had source references but no provenance.
+  if (
+    !record.provenance &&
+    sourceReferences.length > 0
+  ) {
+    record.provenance = {
+      type: "document_extraction",
+    };
+  }
+
+  // Old extracted items were active by definition because removals
+  // did not exist in the previous contract.
+  if (
+    !record.status &&
+    record.provenance
+  ) {
+    record.status = "active";
+  }
+
+  // Backfill a deterministic identity for old document-derived items.
+  if (
+    !record.id &&
+    record.provenance &&
+    typeof record.provenance === "object" &&
+    (record.provenance as Record<string, unknown>)
+      .type === "document_extraction"
+  ) {
+    record.id = createLegacyItemId(
+      category,
+      record,
+    );
+  }
+
+  return record;
+}
+
+function normalizeLegacyTimeline(
+  value: unknown,
+): unknown {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return value;
+  }
+
+  const record = {
+    ...(value as Record<string, unknown>),
+  };
+
+  const sourceReferences = Array.isArray(
+    record.sourceReferences,
+  )
+    ? record.sourceReferences
+    : [];
+
+  if (
+    !record.provenance &&
+    sourceReferences.length > 0
+  ) {
+    record.provenance = {
+      type: "document_extraction",
+    };
+  }
+
+  return record;
+}
+
+/**
+ * Converts old ScopeBaseline JSON into the current persisted contract.
+ *
+ * This is for legacy database records only.
+ * New Gemini output does not pass through this path.
+ */
+export function normalizeLegacyScope(
+  value: unknown,
+): unknown {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    ...record,
+
+    deliverables: Array.isArray(
+      record.deliverables,
+    )
+      ? record.deliverables.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "deliverables",
+          ),
+        )
+      : record.deliverables,
+
+    features: Array.isArray(
+      record.features,
+    )
+      ? record.features.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "features",
+          ),
+        )
+      : record.features,
+
+    exclusions: Array.isArray(
+      record.exclusions,
+    )
+      ? record.exclusions.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "exclusions",
+          ),
+        )
+      : record.exclusions,
+
+    clientResponsibilities:
+      Array.isArray(
+        record.clientResponsibilities,
+      )
+        ? record.clientResponsibilities.map(
+            (item) =>
+              normalizeLegacyItem(
+                item,
+                "clientResponsibilities",
+              ),
+          )
+        : record.clientResponsibilities,
+
+    revisionLimits: Array.isArray(
+      record.revisionLimits,
+    )
+      ? record.revisionLimits.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "revisionLimits",
+          ),
+        )
+      : record.revisionLimits,
+
+    timeline: normalizeLegacyTimeline(
+      record.timeline,
+    ),
+
+    assumptions: Array.isArray(
+      record.assumptions,
+    )
+      ? record.assumptions.map((item) =>
+          normalizeLegacyItem(
+            item,
+            "assumptions",
+          ),
+        )
+      : record.assumptions,
+  };
+}
+
+export function parseStoredScope(
+  value: unknown,
+) {
+  return normalizedScopeSchema.safeParse(
+    normalizeLegacyScope(value),
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Evidence validation                                                        */
+/* -------------------------------------------------------------------------- */
+
+export function validateExtractedScopeSourceReferences(
+  scope: ExtractedScope,
+  sourceText: string,
+): boolean {
+  const quotes: string[] = [];
+
+  const validateReferences = (
+    items: Array<{
+      sourceReferences: Array<{
+        quote: string;
+      }>;
+    }>,
+  ) => {
+    for (const item of items) {
+      if (
+        item.sourceReferences.length === 0
+      ) {
+        console.error(
+          "Extracted item has no source references.",
+        );
+
+        return false;
+      }
+
+      for (const reference of item.sourceReferences) {
+        if (
+          !sourceText.includes(
+            reference.quote,
+          )
+        ) {
+          console.error(
+            "Invalid source reference:",
+            JSON.stringify(reference.quote),
+          );
+
+          return false;
+        }
+
+        quotes.push(reference.quote);
+      }
+    }
+
+    return true;
+  };
+
+  if (
+    !validateReferences(scope.deliverables)
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(scope.features)
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(scope.exclusions)
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(
+      scope.clientResponsibilities,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(
+      scope.revisionLimits,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(scope.assumptions)
+  ) {
+    return false;
+  }
+
+  for (const reference of scope.timeline
+    .sourceReferences) {
+    if (
+      !sourceText.includes(
+        reference.quote,
+      )
+    ) {
+      console.error(
+        "Invalid timeline source reference:",
+        JSON.stringify(reference.quote),
+      );
+
+      return false;
+    }
+
+    quotes.push(reference.quote);
+  }
+
+  if (new Set(quotes).size !== quotes.length) {
+    const duplicates = quotes.filter(
+      (quote, index) =>
+        quotes.indexOf(quote) !== index,
+    );
+
+    console.error(
+      "Duplicate source references:",
+      [...new Set(duplicates)],
+    );
+
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Validate a persisted scope.
+ *
+ * Document-derived items must have real SOW evidence.
+ * Manual amendments intentionally have none.
+ */
+export function validateScopeSourceReferences(
+  scope: NormalizedScope,
+  sourceText: string,
+): boolean {
+  const quotes: string[] = [];
+
+  const validateReferences = (
+    items: Array<{
+      sourceReferences: Array<{
+        quote: string;
+      }>;
+      provenance: {
+        type:
+          | "document_extraction"
+          | "manual_amendment";
+      };
+    }>,
+  ) => {
+    for (const item of items) {
+      if (
+        item.provenance.type ===
+        "manual_amendment"
+      ) {
+        if (
+          item.sourceReferences.length > 0
+        ) {
+          console.error(
+            "Manual amendment contains document source references.",
+          );
+
+          return false;
+        }
+
+        continue;
+      }
+
+      if (
+        item.sourceReferences.length === 0
+      ) {
+        console.error(
+          "Document-extracted item has no source references.",
+        );
+
+        return false;
+      }
+
+      for (const reference of item.sourceReferences) {
+        if (
+          !sourceText.includes(
+            reference.quote,
+          )
+        ) {
+          console.error(
+            "Invalid source reference:",
+            JSON.stringify(reference.quote),
+          );
+
+          return false;
+        }
+
+        quotes.push(reference.quote);
+      }
+    }
+
+    return true;
+  };
+
+  if (
+    !validateReferences(scope.deliverables)
+  ) {
+    return false;
+  }
+
+  if (!validateReferences(scope.features)) {
+    return false;
+  }
+
+  if (!validateReferences(scope.exclusions)) {
+    return false;
+  }
+
+  if (
+    !validateReferences(
+      scope.clientResponsibilities,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(
+      scope.revisionLimits,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    !validateReferences(scope.assumptions)
+  ) {
+    return false;
+  }
+
+  if (scope.timeline.provenance) {
+    if (
+      scope.timeline.provenance.type ===
+      "manual_amendment"
+    ) {
+      if (
+        scope.timeline.sourceReferences.length >
+        0
+      ) {
+        console.error(
+          "Manual timeline amendment contains document source references.",
+        );
+
+        return false;
+      }
+    } else {
+      if (
+        scope.timeline.sourceReferences.length ===
+        0
+      ) {
+        console.error(
+          "Document-extracted timeline has no source references.",
+        );
+
+        return false;
+      }
+
+      for (const reference of scope.timeline
+        .sourceReferences) {
+        if (
+          !sourceText.includes(
+            reference.quote,
+          )
+        ) {
+          console.error(
+            "Invalid timeline source reference:",
+            JSON.stringify(reference.quote),
+          );
+
+          return false;
+        }
+
+        quotes.push(reference.quote);
+      }
+    }
+  }
+
+  if (new Set(quotes).size !== quotes.length) {
+    const duplicates = quotes.filter(
+      (quote, index) =>
+        quotes.indexOf(quote) !== index,
+    );
+
+    console.error(
+      "Duplicate source references:",
+      [...new Set(duplicates)],
+    );
+
+    return false;
+  }
+
+  return true;
+}
+</file>
+
+<file path="lib/scope.ts">
+import { randomUUID } from "node:crypto";
+
+import { prisma } from "@/lib/db";
+import { getCurrentOrganizationId } from "@/lib/auth-session";
+import { extractScope } from "@/lib/ai/scope/extract";
+
+import {
+  parseStoredScope,
+  validateScopeSourceReferences,
+  type ExtractedScope,
+  type NormalizedScope,
+} from "@/lib/scope-schema";
+
+/**
+ * These are the scope sections that contain independently identifiable
+ * items. Timeline is intentionally excluded because it is a singleton.
+ */
+export type ScopeArraySection =
+  | "deliverables"
+  | "features"
+  | "exclusions"
+  | "clientResponsibilities"
+  | "revisionLimits"
+  | "assumptions";
+
+type ScopeArrayItem =
+  NormalizedScope[ScopeArraySection][number];
+
+type StandardManualItemInput = {
+  title: string;
+  description?: string;
+};
+
+type RevisionLimitManualItemInput = {
+  type: string;
+  limit: string;
+};
+
+type AssumptionManualItemInput = {
+  statement: string;
+};
+
+type ManualItemInput =
+  | StandardManualItemInput
+  | RevisionLimitManualItemInput
+  | AssumptionManualItemInput;
+
+/**
+ * Gemini only returns extraction data.
+ *
+ * Persistent identity and lifecycle metadata belong to the application,
+ * so Gemini can never invent historical IDs or provenance.
+ */
+function materializeExtractedScope(
+  scope: ExtractedScope,
+): NormalizedScope {
+  const materializeItem = <
+    T extends {
+      title: string;
+      description?: string;
+      sourceReferences: Array<{
+        quote: string;
+        section?: string;
+      }>;
+    },
+  >(
+    item: T,
+  ) => ({
+    ...item,
+    id: randomUUID(),
+    provenance: {
+      type: "document_extraction" as const,
+    },
+    status: "active" as const,
+  });
+
+  const hasTimelineContent =
+    Boolean(scope.timeline.duration?.trim()) ||
+    Boolean(
+      scope.timeline.startCondition?.trim(),
+    ) ||
+    scope.timeline.dependencies.length > 0 ||
+    scope.timeline.sourceReferences.length > 0;
+
+  return {
+    deliverables:
+      scope.deliverables.map(
+        materializeItem,
+      ),
+
+    features:
+      scope.features.map(
+        materializeItem,
+      ),
+
+    exclusions:
+      scope.exclusions.map(
+        materializeItem,
+      ),
+
+    clientResponsibilities:
+      scope.clientResponsibilities.map(
+        materializeItem,
+      ),
+
+    revisionLimits:
+      scope.revisionLimits.map(
+        (item) => ({
+          ...item,
+          id: randomUUID(),
+          provenance: {
+            type:
+              "document_extraction" as const,
+          },
+          status: "active" as const,
+        }),
+      ),
+
+    timeline: {
+      ...scope.timeline,
+
+      ...(hasTimelineContent
+        ? {
+            provenance: {
+              type:
+                "document_extraction" as const,
+            },
+          }
+        : {}),
+    },
+
+    assumptions:
+      scope.assumptions.map(
+        (item) => ({
+          ...item,
+          id: randomUUID(),
+          provenance: {
+            type:
+              "document_extraction" as const,
+          },
+          status: "active" as const,
+        }),
+      ),
+  };
+}
+
+/**
+ * Resolve a draft baseline through the current organization and parse
+ * its persisted JSON into the canonical normalized representation.
+ *
+ * Every mutation in this file goes through this boundary first.
+ */
+async function getDraftBaseline(
+  baselineId: string,
+) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const baseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        id: baselineId,
+        project: {
+          organizationId,
+        },
+      },
+      select: {
+        id: true,
+        projectId: true,
+        status: true,
+        sourceText: true,
+        structuredScope: true,
+      },
+    });
+
+  if (!baseline) {
+    throw new Error(
+      "Scope baseline not found.",
+    );
+  }
+
+  if (baseline.status !== "DRAFT") {
+    throw new Error(
+      "Only draft scope baselines can be modified.",
+    );
+  }
+
+  const parsed = parseStoredScope(
+    baseline.structuredScope,
+  );
+
+  if (!parsed.success) {
+    throw new Error(
+      "Scope structure is invalid.",
+    );
+  }
+
+  if (
+    !validateScopeSourceReferences(
+      parsed.data,
+      baseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return {
+    ...baseline,
+    structuredScope: parsed.data,
+  };
+}
+
+/**
+ * Persist a fully validated scope mutation.
+ *
+ * We validate again immediately before writing so every mutation has the
+ * same evidence and structural guarantees as the approval boundary.
+ */
+async function persistDraftScope(
+  baseline: {
+    id: string;
+    sourceText: string;
+  },
+  scope: NormalizedScope,
+) {
+  if (
+    !validateScopeSourceReferences(
+      scope,
+      baseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return prisma.scopeBaseline.update({
+    where: {
+      id: baseline.id,
+    },
+    data: {
+      structuredScope: scope,
+    },
+  });
+}
+
+/**
+ * Find an item inside one of the array-based scope sections.
+ */
+function findScopeItem(
+  scope: NormalizedScope,
+  section: ScopeArraySection,
+  itemId: string,
+) {
+  const items =
+    scope[section] as ScopeArrayItem[];
+
+  const index = items.findIndex(
+    (item) => item.id === itemId,
+  );
+
+  if (index === -1) {
+    throw new Error(
+      "Scope item not found.",
+    );
+  }
+
+  return {
+    items,
+    index,
+    item: items[index],
+  };
+}
+
+/**
+ * Add a brand-new scope item manually.
+ *
+ * Manual additions never receive fake SOW evidence. Their provenance
+ * explicitly records why the agency accepted the addition.
+ */
+export async function addManualScopeItem(data: {
+  baselineId: string;
+  section: ScopeArraySection;
+  item: ManualItemInput;
+  rationale: string;
+  referenceId: string;
+}) {
+  const baseline =
+    await getDraftBaseline(
+      data.baselineId,
+    );
+
+  const rationale =
+    data.rationale.trim();
+
+  const referenceId =
+    data.referenceId.trim();
+
+  if (!rationale) {
+    throw new Error(
+      "Amendment rationale is required.",
+    );
+  }
+
+  if (!referenceId) {
+    throw new Error(
+      "Amendment reference is required.",
+    );
+  }
+
+  let newItem: ScopeArrayItem;
+
+  switch (data.section) {
+    case "deliverables":
+    case "features":
+    case "exclusions":
+    case "clientResponsibilities": {
+      const item =
+        data.item as StandardManualItemInput;
+
+      const title =
+        item.title.trim();
+
+      if (!title) {
+        throw new Error(
+          "Title cannot be empty.",
+        );
+      }
+
+      newItem = {
+        title,
+        description:
+          item.description?.trim() ||
+          undefined,
+        sourceReferences: [],
+        id: randomUUID(),
+        provenance: {
+          type: "manual_amendment",
+          rationale,
+          referenceId,
+        },
+        status: "active",
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    case "revisionLimits": {
+      const item =
+        data.item as RevisionLimitManualItemInput;
+
+      const type =
+        item.type.trim();
+
+      const limit =
+        item.limit.trim();
+
+      if (!type || !limit) {
+        throw new Error(
+          "Revision limit type and limit cannot be empty.",
+        );
+      }
+
+      newItem = {
+        type,
+        limit,
+        sourceReferences: [],
+        id: randomUUID(),
+        provenance: {
+          type: "manual_amendment",
+          rationale,
+          referenceId,
+        },
+        status: "active",
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    case "assumptions": {
+      const item =
+        data.item as AssumptionManualItemInput;
+
+      const statement =
+        item.statement.trim();
+
+      if (!statement) {
+        throw new Error(
+          "Assumption statement cannot be empty.",
+        );
+      }
+
+      newItem = {
+        statement,
+        sourceReferences: [],
+        id: randomUUID(),
+        provenance: {
+          type: "manual_amendment",
+          rationale,
+          referenceId,
+        },
+        status: "active",
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    default:
+      throw new Error(
+        "Unsupported scope section.",
+      );
+  }
+
+  const updatedScope = {
+    ...baseline.structuredScope,
+    [data.section]: [
+      ...(baseline.structuredScope[
+        data.section
+      ] as ScopeArrayItem[]),
+      newItem,
+    ],
+  } as NormalizedScope;
+
+  const updated =
+    await persistDraftScope(
+      baseline,
+      updatedScope,
+    );
+
+  return {
+    baseline: updated,
+    itemId: newItem.id,
+  };
+}
+
+/**
+ * Edit the meaning of an existing scope item.
+ *
+ * Document-derived items retain their original document provenance and
+ * receive amendment metadata. This preserves the distinction between
+ * "where the item came from" and "why its meaning changed".
+ *
+ * Manual items remain manual amendments. Their version-local provenance
+ * records the reason/reference for the latest manual change.
+ */
+export async function amendScopeItem(data: {
+  baselineId: string;
+  section: ScopeArraySection;
+  itemId: string;
+  changes:
+    | StandardManualItemInput
+    | RevisionLimitManualItemInput
+    | AssumptionManualItemInput;
+  rationale: string;
+  referenceId: string;
+}) {
+  const baseline =
+    await getDraftBaseline(
+      data.baselineId,
+    );
+
+  const rationale =
+    data.rationale.trim();
+
+  const referenceId =
+    data.referenceId.trim();
+
+  if (!rationale) {
+    throw new Error(
+      "Amendment rationale is required.",
+    );
+  }
+
+  if (!referenceId) {
+    throw new Error(
+      "Amendment reference is required.",
+    );
+  }
+
+  const {
+    items,
+    index,
+    item,
+  } = findScopeItem(
+    baseline.structuredScope,
+    data.section,
+    data.itemId,
+  );
+
+  if (item.status !== "active") {
+    throw new Error(
+      "Removed scope items cannot be amended.",
+    );
+  }
+
+  let updatedItem: ScopeArrayItem;
+
+  switch (data.section) {
+    case "deliverables":
+    case "features":
+    case "exclusions":
+    case "clientResponsibilities": {
+      const changes =
+        data.changes as StandardManualItemInput;
+
+      const title =
+        changes.title.trim();
+
+      if (!title) {
+        throw new Error(
+          "Title cannot be empty.",
+        );
+      }
+
+      updatedItem = {
+        ...item,
+        title,
+        description:
+          changes.description?.trim() ||
+          undefined,
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    case "revisionLimits": {
+      const changes =
+        data.changes as RevisionLimitManualItemInput;
+
+      const type =
+        changes.type.trim();
+
+      const limit =
+        changes.limit.trim();
+
+      if (!type || !limit) {
+        throw new Error(
+          "Revision limit type and limit cannot be empty.",
+        );
+      }
+
+      updatedItem = {
+        ...item,
+        type,
+        limit,
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    case "assumptions": {
+      const changes =
+        data.changes as AssumptionManualItemInput;
+
+      const statement =
+        changes.statement.trim();
+
+      if (!statement) {
+        throw new Error(
+          "Assumption statement cannot be empty.",
+        );
+      }
+
+      updatedItem = {
+        ...item,
+        statement,
+      } as ScopeArrayItem;
+
+      break;
+    }
+
+    default:
+      throw new Error(
+        "Unsupported scope section.",
+      );
+  }
+
+  // Evidence is immutable. A caller can change semantic fields but can
+  // never replace the original document evidence through this operation.
+  updatedItem.sourceReferences =
+    item.sourceReferences;
+
+  if (
+    item.provenance.type ===
+    "document_extraction"
+  ) {
+    updatedItem.provenance = {
+      type: "document_extraction",
+    };
+
+    updatedItem.amendment = {
+      rationale,
+      referenceId,
+    };
+  } else {
+    updatedItem.provenance = {
+      type: "manual_amendment",
+      rationale,
+      referenceId,
+    };
+
+    // Manual items keep their rationale/reference in provenance.
+    delete updatedItem.amendment;
+  }
+
+  updatedItem.status = "active";
+  delete updatedItem.removal;
+
+  items[index] = updatedItem;
+
+  const updatedScope = {
+    ...baseline.structuredScope,
+    [data.section]:
+      items,
+  } as NormalizedScope;
+
+  const updated =
+    await persistDraftScope(
+      baseline,
+      updatedScope,
+    );
+
+  return {
+    baseline: updated,
+    itemId: data.itemId,
+  };
+}
+
+/**
+ * Tombstone an item instead of deleting it from the version snapshot.
+ *
+ * The item retains its identity, provenance, and original evidence.
+ * Only its lifecycle state changes.
+ */
+export async function removeScopeItem(data: {
+  baselineId: string;
+  section: ScopeArraySection;
+  itemId: string;
+  rationale: string;
+  referenceId: string;
+}) {
+  const baseline =
+    await getDraftBaseline(
+      data.baselineId,
+    );
+
+  const rationale =
+    data.rationale.trim();
+
+  const referenceId =
+    data.referenceId.trim();
+
+  if (!rationale) {
+    throw new Error(
+      "Removal rationale is required.",
+    );
+  }
+
+  if (!referenceId) {
+    throw new Error(
+      "Removal reference is required.",
+    );
+  }
+
+  const {
+    items,
+    index,
+    item,
+  } = findScopeItem(
+    baseline.structuredScope,
+    data.section,
+    data.itemId,
+  );
+
+  if (item.status === "removed") {
+    throw new Error(
+      "Scope item is already removed.",
+    );
+  }
+
+  items[index] = {
+    ...item,
+    status: "removed",
+    removal: {
+      rationale,
+      referenceId,
+    },
+  } as ScopeArrayItem;
+
+  const updatedScope = {
+    ...baseline.structuredScope,
+    [data.section]:
+      items,
+  } as NormalizedScope;
+
+  const updated =
+    await persistDraftScope(
+      baseline,
+      updatedScope,
+    );
+
+  return {
+    baseline: updated,
+    itemId: data.itemId,
+  };
+}
+
+/**
+ * Timeline has no item ID because it is a singleton.
+ *
+ * Document-derived timeline content keeps its source evidence and receives
+ * amendment metadata when its meaning changes. Manual timeline changes use
+ * manual provenance and therefore carry no fake document evidence.
+ */
+export async function amendScopeTimeline(data: {
+  baselineId: string;
+  duration?: string;
+  startCondition?: string;
+  dependencies: string[];
+  rationale: string;
+  referenceId: string;
+}) {
+  const baseline =
+    await getDraftBaseline(
+      data.baselineId,
+    );
+
+  const rationale =
+    data.rationale.trim();
+
+  const referenceId =
+    data.referenceId.trim();
+
+  if (!rationale) {
+    throw new Error(
+      "Amendment rationale is required.",
+    );
+  }
+
+  if (!referenceId) {
+    throw new Error(
+      "Amendment reference is required.",
+    );
+  }
+
+  const duration =
+    data.duration?.trim() ||
+    undefined;
+
+  const startCondition =
+    data.startCondition?.trim() ||
+    undefined;
+
+  const dependencies =
+    data.dependencies
+      .map((dependency) =>
+        dependency.trim(),
+      )
+      .filter(Boolean);
+
+  if (
+    !duration &&
+    !startCondition &&
+    dependencies.length === 0
+  ) {
+    throw new Error(
+      "Timeline must contain at least one value.",
+    );
+  }
+
+  const timeline =
+    baseline.structuredScope.timeline;
+
+  const updatedTimeline = {
+    ...timeline,
+    duration,
+    startCondition,
+    dependencies,
+  };
+
+  if (
+    timeline.provenance?.type ===
+    "document_extraction"
+  ) {
+    updatedTimeline.provenance = {
+      type: "document_extraction",
+    };
+
+    updatedTimeline.amendment = {
+      rationale,
+      referenceId,
+    };
+  } else {
+    updatedTimeline.sourceReferences = [];
+
+    updatedTimeline.provenance = {
+      type: "manual_amendment",
+      rationale,
+      referenceId,
+    };
+
+    delete updatedTimeline.amendment;
+  }
+
+  const updatedScope = {
+    ...baseline.structuredScope,
+    timeline:
+      updatedTimeline,
+  } as NormalizedScope;
+
+  const updated =
+    await persistDraftScope(
+      baseline,
+      updatedScope,
+    );
+
+  return {
+    baseline: updated,
+  };
+}
+
+export async function createScopeBaseline(data: {
+  projectId: string;
+  sourceText: string;
+}) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const sourceText =
+    data.sourceText.trim();
+
+  if (!sourceText) {
+    throw new Error(
+      "Scope text cannot be empty.",
+    );
+  }
+
+  // Enforce organization ownership before processing or persisting scope.
+  const project =
+    await prisma.project.findFirst({
+      where: {
+        id: data.projectId,
+        organizationId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+  if (!project) {
+    throw new Error(
+      "Project not found.",
+    );
+  }
+
+  // Gemini performs document extraction only.
+  const extractedScope =
+    await extractScope(sourceText);
+
+  // The application assigns persistent identity and document provenance.
+  const structuredScope =
+    materializeExtractedScope(
+      extractedScope,
+    );
+
+  // The persisted scope must pass the same strict evidence validation
+  // before it becomes a database record.
+  if (
+    !validateScopeSourceReferences(
+      structuredScope,
+      sourceText,
+    )
+  ) {
+    throw new Error(
+      "Extracted scope contains invalid source references.",
+    );
+  }
+
+  const latestBaseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        projectId: project.id,
+      },
+      orderBy: {
+        version: "desc",
+      },
+      select: {
+        version: true,
+      },
+    });
+
+  const version =
+    (latestBaseline?.version ?? 0) + 1;
+
+  return prisma.scopeBaseline.create({
+    data: {
+      projectId: project.id,
+      version,
+      status: "DRAFT",
+      sourceType: "PASTE",
+      sourceText,
+      structuredScope,
+    },
+  });
+}
+
+export async function createScopeVersion(
+  projectId: string,
+) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const project =
+    await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        organizationId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+  if (!project) {
+    throw new Error(
+      "Project not found.",
+    );
+  }
+
+  // Always create the next version from the latest approved version.
+  const latestBaseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        projectId: project.id,
+      },
+      orderBy: {
+        version: "desc",
+      },
+      select: {
+        id: true,
+        version: true,
+        status: true,
+        sourceType: true,
+        sourceText: true,
+        structuredScope: true,
+      },
+    });
+
+  if (!latestBaseline) {
+    throw new Error(
+      "No scope baseline exists for this project.",
+    );
+  }
+
+  if (
+    latestBaseline.status !==
+    "APPROVED"
+  ) {
+    throw new Error(
+      "The current scope version must be approved before creating a new version.",
+    );
+  }
+
+  // Legacy approved records are normalized here while we migrate the
+  // database to the canonical persisted representation.
+  const parsed = parseStoredScope(
+    latestBaseline.structuredScope,
+  );
+
+  if (!parsed.success) {
+    throw new Error(
+      "Scope structure is invalid.",
+    );
+  }
+
+  const structuredScope =
+    parsed.data;
+
+  if (
+    !validateScopeSourceReferences(
+      structuredScope,
+      latestBaseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return prisma.scopeBaseline.create({
+    data: {
+      projectId: project.id,
+      version:
+        latestBaseline.version + 1,
+      status: "DRAFT",
+      sourceType:
+        latestBaseline.sourceType,
+      sourceText:
+        latestBaseline.sourceText,
+      // Copy the approved snapshot exactly. IDs and provenance therefore
+      // survive into the next version unless a later amendment changes them.
+      structuredScope,
+    },
+  });
+}
+
+export async function updateScopeBaseline(data: {
+  baselineId: string;
+  structuredScope: unknown;
+}) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const baseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        id: data.baselineId,
+        project: {
+          organizationId,
+        },
+      },
+      select: {
+        id: true,
+        status: true,
+        sourceText: true,
+      },
+    });
+
+  if (!baseline) {
+    throw new Error(
+      "Scope baseline not found.",
+    );
+  }
+
+  if (
+    baseline.status !== "DRAFT"
+  ) {
+    throw new Error(
+      "Only draft scope baselines can be edited.",
+    );
+  }
+
+  // Keep the existing generic persistence path temporarily for the
+  // current review UI. New amendment-aware UI operations should use
+  // addManualScopeItem/amendScopeItem/removeScopeItem/amendScopeTimeline.
+  const parsed = parseStoredScope(
+    data.structuredScope,
+  );
+
+  if (!parsed.success) {
+    throw new Error(
+      "Invalid scope structure.",
+    );
+  }
+
+  if (
+    !validateScopeSourceReferences(
+      parsed.data,
+      baseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return prisma.scopeBaseline.update({
+    where: {
+      id: baseline.id,
+    },
+    data: {
+      structuredScope: parsed.data,
+    },
+  });
+}
+
+export async function approveScopeBaseline(
+  baselineId: string,
+) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const baseline =
+    await prisma.scopeBaseline.findFirst({
+      where: {
+        id: baselineId,
+        project: {
+          organizationId,
+        },
+      },
+      select: {
+        id: true,
+        status: true,
+        sourceText: true,
+        structuredScope: true,
+      },
+    });
+
+  if (!baseline) {
+    throw new Error(
+      "Scope baseline not found.",
+    );
+  }
+
+  if (
+    baseline.status !==
+    "DRAFT"
+  ) {
+    throw new Error(
+      "Only draft scope baselines can be approved.",
+    );
+  }
+
+  const parsed = parseStoredScope(
+    baseline.structuredScope,
+  );
+
+  if (!parsed.success) {
+    throw new Error(
+      "Scope structure is invalid.",
+    );
+  }
+
+  if (
+    !validateScopeSourceReferences(
+      parsed.data,
+      baseline.sourceText,
+    )
+  ) {
+    throw new Error(
+      "Scope contains invalid source references.",
+    );
+  }
+
+  return prisma.scopeBaseline.update({
+    where: {
+      id: baseline.id,
+    },
+    data: {
+      status: "APPROVED",
+      approvedAt: new Date(),
+      structuredScope: parsed.data,
+    },
+  });
+}
+</file>
+
+</files>

@@ -1,0 +1,1893 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+app/
+  (dashboard)/
+    projects/
+      [projectId]/
+        requests/
+          [requestId]/
+            page.tsx
+          actions.ts
+components/
+  projects/
+    request/
+      request-analysis-panel.tsx
+lib/
+  ai/
+    request/
+      decompose.ts
+    gemini-schema.ts
+    gemini.ts
+    provider.ts
+  requests.ts
+  scope-evidence.ts
+prisma/
+  schema.prisma
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="components/projects/request/request-analysis-panel.tsx">
+import {
+  CircleHelp,
+  Clock3,
+  FileSearch,
+  GitCompareArrows,
+  ShieldCheck,
+} from "lucide-react";
+import type { ComponentType } from "react";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+type RequestAnalysisPanelProps = {
+  hasScopeBaseline: boolean;
+};
+
+export function RequestAnalysisPanel({
+  hasScopeBaseline,
+}: RequestAnalysisPanelProps) {
+  return (
+    <Card>
+      <CardHeader className="border-b px-5 py-4">
+        <div className="flex items-center gap-2">
+          <FileSearch className="size-4 text-muted-foreground" />
+          <CardTitle>How this request will be evaluated</CardTitle>
+        </div>
+      </CardHeader>
+
+      <CardContent className="p-5">
+        <div className="space-y-4">
+          <AnalysisStep
+            icon={GitCompareArrows}
+            title="Compare with approved scope"
+            description="Check whether the requested work is already covered by the project's agreed scope."
+            state={hasScopeBaseline ? "ready" : "blocked"}
+          />
+
+          <AnalysisStep
+            icon={ShieldCheck}
+            title="Identify affected scope"
+            description="Connect the request to the specific scope items, exclusions, assumptions, or limits it touches."
+            state={hasScopeBaseline ? "ready" : "blocked"}
+          />
+
+          <AnalysisStep
+            icon={Clock3}
+            title="Estimate effort and commercial impact"
+            description="Estimate additional work, internal cost, timeline impact, and the resulting margin effect."
+            state="upcoming"
+          />
+
+          <AnalysisStep
+            icon={CircleHelp}
+            title="Recommend the next action"
+            description="Surface an evidence-backed recommendation such as absorb, charge, swap, or defer."
+            state="upcoming"
+          />
+        </div>
+
+        {!hasScopeBaseline && (
+          <div className="mt-5 rounded-lg border border-warning/15 bg-warning/5 p-3.5">
+            <p className="text-sm font-medium">
+              A scope baseline is required before analysis.
+            </p>
+
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Define and approve the project scope first so this request has a
+              trusted reference point.
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AnalysisStep({
+  icon: Icon,
+  title,
+  description,
+  state,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
+  state: "ready" | "blocked" | "upcoming";
+}) {
+  const iconClassName =
+    state === "ready"
+      ? "bg-success/10 text-success"
+      : state === "blocked"
+        ? "bg-warning/10 text-warning"
+        : "bg-muted text-muted-foreground";
+
+  return (
+    <div className="flex items-start gap-3">
+      <div
+        className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${iconClassName}`}
+      >
+        <Icon className="size-4" />
+      </div>
+
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{title}</p>
+
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          {description}
+        </p>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="lib/ai/request/decompose.ts">
+import { geminiProvider } from "@/lib/ai/gemini";
+
+export type AtomicRequestBreakdown = {
+  items: string[];
+};
+
+const atomicRequestGeminiSchema = {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+    },
+  },
+  required: ["items"],
+} as const;
+
+const SYSTEM_INSTRUCTION = `
+You are the Scope Copilot Atomic Request Breakdown Engine.
+
+Your job is to split one client request into the smallest useful set of
+independent client asks.
+
+You are NOT a scope classifier, pricing engine, or decision engine.
+
+Do not decide whether an ask is in scope.
+Do not estimate effort.
+Do not invent requirements.
+Do not add implementation details that the client did not request.
+
+Rules:
+
+1. Preserve the meaning of the client's original wording.
+2. Create one item for each independently analyzable client ask.
+3. If the message contains only one ask, return exactly one item.
+4. Split conjunctions when they represent separate pieces of work.
+5. Keep closely dependent wording together when splitting would change meaning.
+6. Each item must stand on its own without relying on another item's text.
+7. Do not create context-only items such as "the website" or "the project".
+8. Do not merge unrelated asks merely because they appear in the same sentence.
+9. Return concise request wording, not commentary.
+10. Return no empty items and no duplicate items.
+
+Example:
+
+Client request:
+"Add downloadable reports, change the hero video, and add Stripe."
+
+Items:
+- "Add downloadable reports."
+- "Change the hero video."
+- "Add Stripe."
+`;
+
+function normalizeItems(value: unknown): string[] {
+  if (!value || typeof value !== "object") {
+    throw new Error(
+      "Atomic request breakdown returned an invalid result.",
+    );
+  }
+
+  const items = (value as { items?: unknown }).items;
+
+  if (!Array.isArray(items)) {
+    throw new Error(
+      "Atomic request breakdown did not return an item list.",
+    );
+  }
+
+  if (items.length < 1 || items.length > 20) {
+    throw new Error(
+      "Atomic request breakdown must contain between 1 and 20 items.",
+    );
+  }
+
+  const normalized = items.map((item) => {
+    if (typeof item !== "string") {
+      throw new Error(
+        "Atomic request breakdown contains a non-text item.",
+      );
+    }
+
+    const text = item.trim();
+
+    if (!text) {
+      throw new Error(
+        "Atomic request breakdown contains an empty item.",
+      );
+    }
+
+    if (text.length > 1000) {
+      throw new Error(
+        "Atomic request breakdown contains an item that is too long.",
+      );
+    }
+
+    return text;
+  });
+
+  const unique = new Set(
+    normalized.map((item) => item.toLowerCase()),
+  );
+
+  if (unique.size !== normalized.length) {
+    throw new Error(
+      "Atomic request breakdown contains duplicate items.",
+    );
+  }
+
+  return normalized;
+}
+
+export async function decomposeClientRequestText(
+  originalText: string,
+): Promise<AtomicRequestBreakdown> {
+  if (!originalText.trim()) {
+    throw new Error("Client request cannot be empty.");
+  }
+
+  const result =
+    await geminiProvider.generateStructuredOutput<unknown>({
+      systemInstruction: SYSTEM_INSTRUCTION,
+      userContent: `Break down this client request into atomic asks:\n\n${originalText}`,
+      schema: atomicRequestGeminiSchema,
+    });
+
+  return {
+    items: normalizeItems(result),
+  };
+}
+</file>
+
+<file path="lib/ai/gemini-schema.ts">
+const sourceReferenceSchema = {
+  type: "object",
+  properties: {
+    quote: {
+      type: "string",
+    },
+    section: {
+      type: "string",
+    },
+  },
+  required: ["quote"],
+} as const;
+
+const scopeItemSchema = {
+  type: "object",
+  properties: {
+    title: {
+      type: "string",
+    },
+    description: {
+      type: "string",
+    },
+    sourceReferences: {
+      type: "array",
+      items: sourceReferenceSchema,
+    },
+  },
+  required: ["title", "sourceReferences"],
+} as const;
+
+const revisionLimitSchema = {
+  type: "object",
+  properties: {
+    type: {
+      type: "string",
+    },
+    limit: {
+      type: "string",
+    },
+    sourceReferences: {
+      type: "array",
+      items: sourceReferenceSchema,
+    },
+  },
+  required: ["type", "limit", "sourceReferences"],
+} as const;
+
+const timelineSchema = {
+  type: "object",
+  properties: {
+    duration: {
+      type: "string",
+    },
+    startCondition: {
+      type: "string",
+    },
+    dependencies: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+    },
+    sourceReferences: {
+      type: "array",
+      items: sourceReferenceSchema,
+    },
+  },
+  required: ["dependencies", "sourceReferences"],
+} as const;
+
+const assumptionSchema = {
+  type: "object",
+  properties: {
+    statement: {
+      type: "string",
+    },
+    sourceReferences: {
+      type: "array",
+      items: sourceReferenceSchema,
+    },
+  },
+  required: ["statement", "sourceReferences"],
+} as const;
+
+export const normalizedScopeGeminiSchema = {
+  type: "object",
+  properties: {
+    deliverables: {
+      type: "array",
+      items: scopeItemSchema,
+    },
+
+    features: {
+      type: "array",
+      items: scopeItemSchema,
+    },
+
+    exclusions: {
+      type: "array",
+      items: scopeItemSchema,
+    },
+
+    clientResponsibilities: {
+      type: "array",
+      items: scopeItemSchema,
+    },
+
+    revisionLimits: {
+      type: "array",
+      items: revisionLimitSchema,
+    },
+
+    timeline: timelineSchema,
+
+    assumptions: {
+      type: "array",
+      items: assumptionSchema,
+    },
+  },
+
+  required: [
+    "deliverables",
+    "features",
+    "exclusions",
+    "clientResponsibilities",
+    "revisionLimits",
+    "timeline",
+    "assumptions",
+  ],
+} as const;
+</file>
+
+<file path="lib/ai/provider.ts">
+export type GenerateStructuredOutputParams = {
+  systemInstruction: string;
+  userContent: string;
+  schema: unknown;
+};
+
+export type AIProvider = {
+  generateStructuredOutput<T>(
+    params: GenerateStructuredOutputParams,
+  ): Promise<T>;
+};
+</file>
+
+<file path="lib/scope-evidence.ts">
+/**
+ * Resolves an LLM-generated evidence candidate back to the exact
+ * characters present in the original source text.
+ *
+ * The LLM may normalize whitespace, but the returned quote always
+ * comes from the original source text.
+ */
+
+/**
+ * Escapes regex-special characters so candidate text can safely
+ * be used inside a regular expression.
+ */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Resolves an LLM-generated evidence candidate against the original SOW.
+ *
+ * Exact matches are returned immediately.
+ *
+ * If the model normalized whitespace, the function performs a
+ * whitespace-insensitive lookup while preserving all other characters.
+ *
+ * Example:
+ *
+ * Candidate:
+ *   "trainer information"
+ *
+ * Source:
+ *   "trainer\ninformation, written content"
+ *
+ * Result:
+ *   "trainer\ninformation"
+ *
+ * Ambiguous matches are rejected instead of guessed.
+ */
+export function resolveSourceQuote(
+  candidateQuote: string,
+  sourceText: string,
+): string | null {
+  // Prefer an exact match whenever possible.
+  if (sourceText.includes(candidateQuote)) {
+    return candidateQuote;
+  }
+
+  const trimmedCandidate = candidateQuote.trim();
+
+  if (!trimmedCandidate) {
+    return null;
+  }
+
+  /*
+   * Allow one-or-more whitespace characters wherever the model
+   * had whitespace in its evidence.
+   *
+   * Everything else remains exact, including punctuation.
+   */
+  const parts = trimmedCandidate.split(/\s+/).map(escapeRegExp);
+  const pattern = parts.join("\\s+");
+  const regex = new RegExp(pattern, "g");
+
+  const matches: Array<{ start: number; end: number }> = [];
+
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(sourceText)) !== null) {
+    matches.push({
+      start: match.index,
+      end: match.index + match[0].length,
+    });
+
+    // Prevent an empty-match regex from looping forever.
+    if (match[0].length === 0) {
+      regex.lastIndex++;
+    }
+  }
+
+  // Never guess when the evidence could refer to multiple places.
+  if (matches.length !== 1) {
+    return null;
+  }
+
+  const matched = matches[0];
+
+  // CRITICAL: return characters from the ORIGINAL source.
+  return sourceText.slice(matched.start, matched.end);
+}
+</file>
+
+<file path="lib/ai/gemini.ts">
+import { GoogleGenAI } from "@google/genai";
+
+import type {
+  AIProvider,
+  GenerateStructuredOutputParams,
+} from "./provider";
+
+type GeminiClient = {
+  models: {
+    generateContent: (params: {
+      model: string;
+      contents: string;
+      config: {
+        systemInstruction: string;
+        responseMimeType: "application/json";
+        responseSchema: unknown;
+      };
+    }) => Promise<{
+      text?: string;
+    }>;
+  };
+};
+
+function createGeminiClient(): GeminiClient {
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not configured.");
+  }
+
+  return new GoogleGenAI({
+    apiKey,
+  });
+}
+
+export function createGeminiProvider(
+  client?: GeminiClient,
+): AIProvider {
+  return {
+    async generateStructuredOutput<T>({
+      systemInstruction,
+      userContent,
+      schema,
+    }: GenerateStructuredOutputParams): Promise<T> {
+      const geminiClient = client ?? createGeminiClient();
+
+      const response = await geminiClient.models.generateContent({
+        model: process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest",
+        // model: "gemini-flash-latest",
+        contents: userContent,
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: schema,
+        },
+      });
+
+      if (!response.text) {
+        throw new Error("Gemini returned an empty response.");
+      }
+
+      try {
+        return JSON.parse(response.text) as T;
+      } catch {
+        throw new Error("Gemini returned invalid JSON.");
+      }
+    },
+  };
+}
+
+export const geminiProvider = createGeminiProvider();
+</file>
+
+<file path="app/(dashboard)/projects/[projectId]/requests/[requestId]/page.tsx">
+import {
+  CheckCircle2,
+  Clock3,
+} from "lucide-react";
+import { notFound } from "next/navigation";
+
+import { getClientRequest } from "@/lib/requests";
+
+import { ProjectWorkspaceHeader } from "@/components/projects/project-workspace-header";
+import { ProjectWorkspaceNav } from "@/components/projects/project-workspace-nav";
+import { RequestItemsPanel } from "@/components/projects/request/request-items-panel";
+import { RequestStatusBadge } from "@/components/projects/request/request-status-badge";
+import type { RequestStatus } from "@/components/projects/request/request-status-badge";
+
+interface RequestDetailPageProps {
+  params: Promise<{
+    projectId: string;
+    requestId: string;
+  }>;
+}
+
+function formatDate(date: Date) {
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export default async function RequestDetailPage({
+  params,
+}: RequestDetailPageProps) {
+  const {
+    projectId,
+    requestId,
+  } = await params;
+
+  const request = await getClientRequest(
+    projectId,
+    requestId,
+  );
+
+  if (!request) {
+    notFound();
+  }
+
+  const status =
+    request.status as RequestStatus;
+
+  return (
+    <div className="min-h-full">
+      <div className="mx-auto max-w-7xl px-5 py-5 sm:px-6 lg:px-8 lg:py-6">
+
+        {/* 
+         * Project-level context stays pinned while the request
+         * analysis workspace scrolls underneath it.
+         *
+         * Header + project navigation intentionally live in the
+         * same sticky container so they never separate while scrolling.
+         */}
+        <div className="sticky top-0 z-40 -mx-5 bg-background/95 px-5 pb-1 backdrop-blur-md sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+          <ProjectWorkspaceHeader
+            projectId={request.project.id}
+            projectName={request.project.name}
+            clientName={request.project.client.name}
+            value={request.project.value}
+            status="Active"
+          />
+
+          <ProjectWorkspaceNav
+            projectId={request.project.id}
+          />
+        </div>
+
+        <main className="mt-5">
+          {/* Request identity + compact scope context */}
+          <div className="flex flex-col gap-3 border-b border-border/70 pb-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">
+                  Request Analysis
+                </h2>
+
+                <RequestStatusBadge
+                  status={status}
+                />
+              </div>
+
+              <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+                Review the client request, break it into atomic asks,
+                and prepare it for scope analysis.
+              </p>
+            </div>
+
+            {/* Compact request metadata */}
+            <section
+              aria-label="Request context"
+              className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs"
+            >
+              <div className="flex items-center gap-2">
+                <div className="flex size-7 items-center justify-center rounded-md bg-primary/10">
+                  <CheckCircle2 className="size-3.5 text-primary" />
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-[0.07em] text-muted-foreground">
+                    Scope
+                  </p>
+
+                  <p className="font-semibold">
+                    Approved Scope v
+                    {
+                      request
+                        .analyzedAgainstBaseline
+                        .version
+                    }
+                  </p>
+                </div>
+              </div>
+
+              <div className="hidden h-7 w-px bg-border sm:block" />
+
+              <div className="flex items-center gap-2">
+                <div className="flex size-7 items-center justify-center rounded-md bg-muted">
+                  <Clock3 className="size-3.5 text-muted-foreground" />
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-[0.07em] text-muted-foreground">
+                    Captured
+                  </p>
+
+                  <p className="font-semibold">
+                    {formatDate(
+                      request.createdAt,
+                    )}
+                  </p>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          {/* 
+           * Immutable original client evidence.
+           * Collapsed by default so the analysis workspace gets
+           * the majority of the vertical space.
+           */}
+          <details className="group mt-4 rounded-xl border bg-card shadow-sm">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3.5 sm:px-5 [&::-webkit-details-marker]:hidden">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+                    Original client request
+                  </p>
+
+                  <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+                    Immutable evidence
+                  </span>
+                </div>
+
+                <p className="mt-1 truncate text-sm text-muted-foreground">
+                  {request.originalText}
+                </p>
+              </div>
+
+              <svg
+                className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <path
+                  d="m6 9 6 6 6-6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </summary>
+
+            <div className="border-t px-4 py-4 sm:px-5">
+              <div className="whitespace-pre-wrap break-words rounded-lg border bg-muted/20 p-4 text-sm leading-relaxed">
+                {request.originalText}
+              </div>
+            </div>
+          </details>
+
+          {/* Main request-analysis workspace */}
+          <div className="mt-4">
+            <RequestItemsPanel
+              projectId={request.project.id}
+              requestId={request.id}
+              items={request.items}
+            />
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="app/(dashboard)/projects/[projectId]/requests/actions.ts">
+"use server";
+
+import { revalidatePath } from "next/cache";
+
+import {
+  createClientRequest,
+  saveClientRequestItems,
+  getClientRequest,
+} from "@/lib/requests";
+
+import { decomposeClientRequestText } from "@/lib/ai/request/decompose";
+
+/**
+ * Server-side transport for request capture.
+ */
+export async function createClientRequestAction(data: {
+  projectId: string;
+  originalText: string;
+}) {
+  const request = await createClientRequest(data);
+
+  revalidatePath(
+    `/projects/${data.projectId}/requests`,
+  );
+
+  revalidatePath(
+    `/projects/${data.projectId}/requests/${request.id}`,
+  );
+
+  return {
+    id: request.id,
+    projectId: request.projectId,
+    analyzedAgainstBaselineId:
+      request.analyzedAgainstBaselineId,
+    baselineVersion: request.baselineVersion,
+    status: request.status,
+  };
+}
+
+/**
+ * Ask Gemini to break the immutable original client message into
+ * independently analyzable asks.
+ *
+ * Nothing is persisted by this action.
+ */
+export async function decomposeClientRequestAction(data: {
+  projectId: string;
+  requestId: string;
+}) {
+  const request = await getClientRequest(
+    data.projectId,
+    data.requestId,
+  );
+
+  if (!request) {
+    throw new Error("Client request not found.");
+  }
+
+  if (request.items.length > 0) {
+    throw new Error(
+      "Atomic request items already exist for this case file.",
+    );
+  }
+
+  return decomposeClientRequestText(
+    request.originalText,
+  );
+}
+
+/**
+ * Persist the human-reviewed atomic request items.
+ *
+ * The saved items are returned directly to the client so the
+ * current analysis workspace can transition without refreshing
+ * the entire Server Component tree.
+ */
+export async function saveClientRequestItemsAction(data: {
+  projectId: string;
+  requestId: string;
+  items: string[];
+}) {
+  const items = await saveClientRequestItems({
+    clientRequestId: data.requestId,
+    items: data.items,
+  });
+
+  // Keep future server renders and the request list fresh.
+  // The current client workspace does not need router.refresh().
+  revalidatePath(
+    `/projects/${data.projectId}/requests/${data.requestId}`,
+  );
+
+  revalidatePath(
+    `/projects/${data.projectId}/requests`,
+  );
+
+  return {
+    items: items.map((item) => ({
+      id: item.id,
+      position: item.position,
+      text: item.text,
+    })),
+  };
+}
+</file>
+
+<file path="lib/requests.ts">
+import { prisma } from "@/lib/db";
+import { getCurrentOrganizationId } from "@/lib/auth-session";
+
+export type ClientRequestStatus =
+  | "NEW"
+  | "ANALYZED"
+  | "REVIEW"
+  | "RESOLVED";
+
+/**
+ * Create a client request and pin it to the latest approved scope.
+ *
+ * The organization, project, baseline lookup, and request creation happen
+ * inside one transaction so the historical baseline choice is atomic.
+ */
+export async function createClientRequest(data: {
+  projectId: string;
+  originalText: string;
+}) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const projectId = data.projectId.trim();
+  const originalText = data.originalText;
+
+  if (!projectId) {
+    throw new Error("Project ID is required.");
+  }
+
+  if (!originalText.trim()) {
+    throw new Error("Client request cannot be empty.");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const project = await tx.project.findFirst({
+      where: {
+        id: projectId,
+        organizationId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!project) {
+      throw new Error("Project not found.");
+    }
+
+    const baseline = await tx.scopeBaseline.findFirst({
+      where: {
+        projectId: project.id,
+        status: "APPROVED",
+      },
+      orderBy: {
+        version: "desc",
+      },
+      select: {
+        id: true,
+        version: true,
+        status: true,
+      },
+    });
+
+    if (!baseline) {
+      throw new Error(
+        "An approved scope baseline is required before capturing a client request.",
+      );
+    }
+
+    const request = await tx.clientRequest.create({
+      data: {
+        projectId: project.id,
+        analyzedAgainstBaselineId: baseline.id,
+        originalText,
+        status: "NEW",
+      },
+      select: {
+        id: true,
+        projectId: true,
+        analyzedAgainstBaselineId: true,
+        originalText: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      ...request,
+      baselineVersion: baseline.version,
+    };
+  });
+}
+
+/**
+ * Load all client requests for a project.
+ *
+ * Organization ownership is checked server-side through the project relation.
+ */
+/**
+ * Load all client requests for a project.
+ *
+ * Organization ownership is checked server-side through the project relation.
+ *
+ * Only the atomic-item count is loaded here because the requests list
+ * does not need the full item records.
+ */
+export async function getClientRequests(projectId: string) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const safeProjectId = projectId.trim();
+
+  if (!safeProjectId) {
+    throw new Error("Project ID is required.");
+  }
+
+  return prisma.clientRequest.findMany({
+    where: {
+      projectId: safeProjectId,
+      project: {
+        organizationId,
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    select: {
+      id: true,
+      projectId: true,
+      originalText: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+
+      analyzedAgainstBaseline: {
+        select: {
+          id: true,
+          version: true,
+          status: true,
+        },
+      },
+
+      _count: {
+        select: {
+          items: true,
+        },
+      },
+    },
+  });
+}
+/**
+ * Load one request only when both the project and request belong to the
+ * authenticated organization.
+ */
+export async function getClientRequest(
+  projectId: string,
+  requestId: string,
+) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const safeProjectId = projectId.trim();
+  const safeRequestId = requestId.trim();
+
+  if (!safeProjectId || !safeRequestId) {
+    throw new Error(
+      "Project ID and request ID are required.",
+    );
+  }
+
+  return prisma.clientRequest.findFirst({
+    where: {
+      id: safeRequestId,
+      projectId: safeProjectId,
+      project: {
+        organizationId,
+      },
+    },
+    select: {
+      id: true,
+      projectId: true,
+      originalText: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+
+      analyzedAgainstBaseline: {
+        select: {
+          id: true,
+          version: true,
+          status: true,
+        },
+      },
+
+      items: {
+        orderBy: {
+          position: "asc",
+        },
+        select: {
+          id: true,
+          clientRequestId: true,
+          position: true,
+          text: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+
+      project: {
+        select: {
+          id: true,
+          name: true,
+          value: true,
+          client: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * Create one atomic ask inside an existing case file.
+ */
+export async function createClientRequestItem(data: {
+  clientRequestId: string;
+  position: number;
+  text: string;
+}) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const clientRequestId = data.clientRequestId.trim();
+  const text = data.text;
+
+  if (!clientRequestId) {
+    throw new Error("Client request ID is required.");
+  }
+
+  if (
+    !Number.isInteger(data.position) ||
+    data.position < 1
+  ) {
+    throw new Error(
+      "Client request item position must be a positive integer.",
+    );
+  }
+
+  if (!text.trim()) {
+    throw new Error(
+      "Client request item cannot be empty.",
+    );
+  }
+
+  const request = await prisma.clientRequest.findFirst({
+    where: {
+      id: clientRequestId,
+      project: {
+        organizationId,
+      },
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!request) {
+    throw new Error("Client request not found.");
+  }
+
+  return prisma.clientRequestItem.create({
+    data: {
+      clientRequestId: request.id,
+      position: data.position,
+      text,
+    },
+    select: {
+      id: true,
+      clientRequestId: true,
+      position: true,
+      text: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+/**
+ * Load atomic asks for a case file.
+ */
+export async function getClientRequestItems(
+  clientRequestId: string,
+) {
+  const organizationId = await getCurrentOrganizationId();
+
+  const safeClientRequestId =
+    clientRequestId.trim();
+
+  if (!safeClientRequestId) {
+    throw new Error(
+      "Client request ID is required.",
+    );
+  }
+
+  return prisma.clientRequestItem.findMany({
+    where: {
+      clientRequestId: safeClientRequestId,
+      clientRequest: {
+        project: {
+          organizationId,
+        },
+      },
+    },
+    orderBy: {
+      position: "asc",
+    },
+    select: {
+      id: true,
+      clientRequestId: true,
+      position: true,
+      text: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+/**
+ * Persist the reviewed AI decomposition.
+ *
+ * Items can only be created when the case file currently has no items.
+ * This prevents silently replacing already-established analysis inputs.
+ */
+export async function saveClientRequestItems(data: {
+  clientRequestId: string;
+  items: string[];
+}) {
+  const organizationId =
+    await getCurrentOrganizationId();
+
+  const clientRequestId =
+    data.clientRequestId.trim();
+
+  if (!clientRequestId) {
+    throw new Error(
+      "Client request ID is required.",
+    );
+  }
+
+  if (
+    !Array.isArray(data.items) ||
+    data.items.length < 1 ||
+    data.items.length > 20
+  ) {
+    throw new Error(
+      "A request must contain between 1 and 20 atomic items.",
+    );
+  }
+
+  const normalizedItems = data.items.map(
+    (item) => {
+      if (typeof item !== "string") {
+        throw new Error(
+          "Atomic request items must be text.",
+        );
+      }
+
+      const text = item.trim();
+
+      if (!text) {
+        throw new Error(
+          "Atomic request items cannot be empty.",
+        );
+      }
+
+      if (text.length > 1000) {
+        throw new Error(
+          "Atomic request items cannot exceed 1000 characters.",
+        );
+      }
+
+      return text;
+    },
+  );
+
+  const uniqueItems = new Set(
+    normalizedItems.map((item) =>
+      item.toLowerCase(),
+    ),
+  );
+
+  if (
+    uniqueItems.size !==
+    normalizedItems.length
+  ) {
+    throw new Error(
+      "Atomic request items must be unique.",
+    );
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const request =
+      await tx.clientRequest.findFirst({
+        where: {
+          id: clientRequestId,
+          project: {
+            organizationId,
+          },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+    if (!request) {
+      throw new Error(
+        "Client request not found.",
+      );
+    }
+
+    const existingCount =
+      await tx.clientRequestItem.count({
+        where: {
+          clientRequestId: request.id,
+        },
+      });
+
+    if (existingCount > 0) {
+      throw new Error(
+        "Atomic request items already exist for this case file.",
+      );
+    }
+
+    await tx.clientRequestItem.createMany({
+      data: normalizedItems.map(
+        (text, index) => ({
+          clientRequestId: request.id,
+          position: index + 1,
+          text,
+        }),
+      ),
+    });
+
+    return tx.clientRequestItem.findMany({
+      where: {
+        clientRequestId: request.id,
+      },
+      orderBy: {
+        position: "asc",
+      },
+      select: {
+        id: true,
+        clientRequestId: true,
+        position: true,
+        text: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  });
+}
+</file>
+
+<file path="prisma/schema.prisma">
+// Scope Copilot's database models.
+//
+// Better Auth owns authentication and organization membership.
+// Our application models (Client, Project) build on top of that.
+//
+// Organization = an agency/workspace.
+// User         = an authenticated person.
+// Member       = connects users to organizations.
+// Client       = a client belonging to an organization.
+// Project      = a project belonging to an organization and client.
+// ClientRequest = a client request evaluated against a specific approved scope version.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth: User
+// -----------------------------------------------------------------------------
+
+model User {
+  id            String   @id
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime
+  updatedAt     DateTime
+
+  sessions Session[]
+  accounts Account[]
+  members  Member[]
+
+  revisionReviewDecisions  RevisionReviewDecision[]
+  finalizedRevisionReviews RevisionReview[]         @relation("RevisionReviewFinalizedBy")
+
+  @@map("user")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth: Session
+// -----------------------------------------------------------------------------
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime
+  updatedAt DateTime
+
+  ipAddress String?
+  userAgent String?
+
+  activeOrganizationId String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth: Account
+// -----------------------------------------------------------------------------
+
+model Account {
+  id         String @id
+  accountId  String
+  providerId String
+  userId     String
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+
+  createdAt DateTime
+  updatedAt DateTime
+
+  @@map("account")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth: Verification
+// -----------------------------------------------------------------------------
+
+model Verification {
+  id         String    @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime?
+  updatedAt  DateTime?
+
+  @@map("verification")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth Organization plugin
+// -----------------------------------------------------------------------------
+
+model Organization {
+  id       String  @id
+  name     String
+  slug     String  @unique
+  logo     String?
+  metadata String?
+
+  members     Member[]
+  invitations Invitation[]
+
+  clients  Client[]
+  projects Project[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@map("organization")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth Organization membership
+//
+// This replaces the old User.organizationId relationship.
+// A user belongs to an organization through this model.
+// -----------------------------------------------------------------------------
+
+model Member {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role      String
+  createdAt DateTime
+
+  @@index([organizationId])
+  @@index([userId])
+  @@map("member")
+}
+
+// -----------------------------------------------------------------------------
+// Better Auth Organization invitations
+// -----------------------------------------------------------------------------
+
+model Invitation {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  email     String
+  role      String?
+  status    String
+  expiresAt DateTime
+  inviterId String
+  createdAt DateTime
+
+  @@index([organizationId])
+  @@map("invitation")
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Client
+// -----------------------------------------------------------------------------
+
+model Client {
+  id    String  @id @default(cuid())
+  name  String
+  email String?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  projects Project[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Project
+// -----------------------------------------------------------------------------
+
+model Project {
+  id    String  @id @default(cuid())
+  name  String
+  value Decimal @db.Decimal(12, 2)
+
+  // Dates are optional because the user may not know the timeline
+  // when creating a project. Scope changes can affect the timeline later.
+  startDate     DateTime?
+  targetEndDate DateTime?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  scopeBaselines          ScopeBaseline[]
+  scopeRevisionCandidates ScopeRevisionCandidate[]
+  clientRequests          ClientRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([clientId])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Scope Baseline
+//
+// A ScopeBaseline is the structured representation of a project's agreed scope.
+// Multiple versions can exist over the lifetime of a project.
+//
+// The original/normalized source text is retained alongside the AI-extracted
+// structure so future decisions can always be grounded in the source material.
+// -----------------------------------------------------------------------------
+
+model ScopeBaseline {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  revisionCandidates ScopeRevisionCandidate[] @relation("ScopeBaselineRevisionCandidates")
+
+  // Requests evaluated against this exact baseline.
+  clientRequests ClientRequest[] @relation("ClientRequestAnalyzedAgainstBaseline")
+
+  // Baseline versions start at 1 and increase whenever the scope is formally
+  // revised. The database constraint prevents duplicate versions per project.
+  version Int @default(1)
+
+  // DRAFT     = extracted/edited but not yet approved
+  // APPROVED  = the active agreed scope
+  // ARCHIVED  = an older approved version
+  status String @default("DRAFT")
+
+  // How the scope entered the system.
+  // V1: PASTE, PDF, DOCX, TXT
+  sourceType String
+
+  // Normalized source content retained for traceability and AI grounding.
+  sourceText String @db.Text
+
+  // Structured scope extracted from the source.
+  //
+  // Expected shape:
+  // {
+  //   deliverables: [],
+  //   features: [],
+  //   exclusions: [],
+  //   clientResponsibilities: [],
+  //   revisionLimits: [],
+  //   timeline: {},
+  //   assumptions: []
+  // }
+  structuredScope Json
+
+  approvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, version])
+  @@index([projectId])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Client Request
+//
+// A ClientRequest is an immutable capture of a client's request.
+//
+// IMPORTANT:
+// analyzedAgainstBaselineId pins the exact approved scope version used for
+// evaluation. Future scope versions must never silently change history.
+// -----------------------------------------------------------------------------
+
+model ClientRequest {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Exact approved scope baseline used when this request was captured for
+  // analysis. Restrict prevents accidental deletion of a referenced baseline.
+  analyzedAgainstBaselineId String
+  analyzedAgainstBaseline   ScopeBaseline @relation("ClientRequestAnalyzedAgainstBaseline", fields: [analyzedAgainstBaselineId], references: [id], onDelete: Restrict)
+
+  // Preserve the original request wording exactly as captured.
+  originalText String @db.Text
+
+  // Atomic asks extracted from this case file. The case remains the immutable
+  // source record; items are the independently analyzable decomposition.
+  items ClientRequestItem[]
+
+  // NEW       = captured, analysis not yet run
+  // ANALYZED  = decision engine has produced an analysis
+  // REVIEW    = human review required
+  // RESOLVED  = request has been resolved
+  status String @default("NEW")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, createdAt])
+  @@index([analyzedAgainstBaselineId])
+  @@index([status])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Client Request Item
+//
+// A ClientRequestItem is one atomic ask inside a ClientRequest case file.
+// It is deliberately limited to decomposition/persistence at this stage.
+// Classification, economics, recommendations, and outcomes are added later.
+// -----------------------------------------------------------------------------
+
+model ClientRequestItem {
+  id String @id @default(cuid())
+
+  clientRequestId String
+  clientRequest   ClientRequest @relation(fields: [clientRequestId], references: [id], onDelete: Cascade)
+
+  // Stable ordering within the case file. Positions are 1-based.
+  position Int
+
+  // Atomic wording used for independent analysis. The complete original client
+  // message remains preserved on ClientRequest.originalText as immutable evidence.
+  text String @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clientRequestId, position])
+  @@index([clientRequestId])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Scope Revision Candidate
+//
+// A revision candidate represents a newly supplied SOW that has been extracted
+// by AI but has NOT yet become an authoritative scope version.
+//
+// This is deliberately separate from ScopeBaseline:
+// AI output must pass through human reconciliation before V2/V3 is created.
+// -----------------------------------------------------------------------------
+
+model ScopeRevisionCandidate {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // The approved baseline this candidate is intended to replace/update.
+  baseBaselineId String
+  baseBaseline   ScopeBaseline @relation("ScopeBaselineRevisionCandidates", fields: [baseBaselineId], references: [id], onDelete: Cascade)
+
+  // PENDING_REVIEW = extracted and waiting for reconciliation.
+  // RECONCILED    = later completed by the reconciliation workflow.
+  // DISCARDED     = later explicitly abandoned.
+  status String @default("PENDING_REVIEW")
+
+  // How the revised SOW entered the system.
+  // 9A currently supports PASTE.
+  sourceType String
+
+  // The new SOW itself, retained as immutable candidate evidence.
+  sourceText String @db.Text
+
+  // IMPORTANT:
+  // This stores ExtractedScope, not NormalizedScope.
+  // IDs/provenance belong to the reconciliation/materialization stage.
+  extractedScope Json
+
+  // Durable reviewer state for this candidate.
+  // There can be only one review workspace per candidate.
+  review RevisionReview?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([baseBaselineId])
+  @@index([status])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Revision Review
+//
+// One durable review workspace belongs to one scope revision candidate.
+//
+// The review itself represents the lifecycle of the reconciliation session.
+// Individual reviewer choices are stored separately in RevisionReviewDecision
+// so we retain an audit trail rather than overwriting the previous decision.
+// -----------------------------------------------------------------------------
+
+model RevisionReview {
+  id String @id @default(cuid())
+
+  // One review workspace per revision candidate.
+  candidateId String                 @unique
+  candidate   ScopeRevisionCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  // IN_PROGRESS = reviewer can still make decisions.
+  // FINALIZING  = finalization has begun.
+  // FINALIZED   = candidate became a new scope draft.
+  // DISCARDED   = review was explicitly abandoned.
+  status String @default("IN_PROGRESS")
+
+  // Set when the review successfully produces the next scope draft.
+  finalizedAt DateTime?
+
+  // Reviewer who completed the finalization.
+  finalizedById String?
+  finalizedBy   User?   @relation("RevisionReviewFinalizedBy", fields: [finalizedById], references: [id], onDelete: Restrict)
+
+  // Full decision history for this review.
+  decisions RevisionReviewDecision[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Revision Review Decision
+//
+// Decisions are intentionally append-only.
+//
+// If a reviewer changes an item's decision from CARRY_OVER to REMOVE,
+// we create another row instead of overwriting the previous one.
+//
+// The latest decision for an item is the authoritative current decision,
+// while older rows remain available as an audit history.
+// -----------------------------------------------------------------------------
+
+model RevisionReviewDecision {
+  id String @id @default(cuid())
+
+  reviewId String
+  review   RevisionReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  // Stable scope item ID from the approved base scope.
+  itemId String
+
+  // Scope section containing the reviewed item.
+  // Examples:
+  // deliverables, features, exclusions, clientResponsibilities,
+  // revisionLimits, assumptions
+  section String
+
+  // CARRY_OVER or REMOVE
+  decision String
+
+  // Authenticated user who made this decision.
+  actorId String
+  actor   User   @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  // Immutable audit timestamp.
+  createdAt DateTime @default(now())
+
+  @@index([reviewId, itemId])
+  @@index([actorId])
+}
+</file>
+
+</files>

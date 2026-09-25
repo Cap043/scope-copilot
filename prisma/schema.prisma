@@ -3,6 +3,7 @@
 // Better Auth owns authentication and organization membership.
 // Our application models (Client, Project) build on top of that.
 //
+
 // Organization = an agency/workspace.
 // User         = an authenticated person.
 // Member       = connects users to organizations.
@@ -24,20 +25,20 @@ datasource db {
 // -----------------------------------------------------------------------------
 
 model User {
-  id            String   @id
-  name          String
-  email         String   @unique
-  emailVerified Boolean  @default(false)
-  image         String?
-  createdAt     DateTime
-  updatedAt     DateTime
+  id          String   @id
+  name        String
+  email       String   @unique
+  emailVerified Boolean @default(false)
+  image       String?
+  createdAt   DateTime
+  updatedAt   DateTime
 
   sessions Session[]
   accounts Account[]
   members  Member[]
 
   revisionReviewDecisions  RevisionReviewDecision[]
-  finalizedRevisionReviews RevisionReview[]         @relation("RevisionReviewFinalizedBy")
+  finalizedRevisionReviews RevisionReview[] @relation("RevisionReviewFinalizedBy")
 
   @@map("user")
 }
@@ -75,13 +76,13 @@ model Account {
   userId     String
   user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  accessToken           String?
-  refreshToken          String?
-  idToken               String?
-  accessTokenExpiresAt  DateTime?
+  accessToken         String?
+  refreshToken        String?
+  idToken             String?
+  accessTokenExpiresAt DateTime?
   refreshTokenExpiresAt DateTime?
-  scope                 String?
-  password              String?
+  scope               String?
+  password            String?
 
   createdAt DateTime
   updatedAt DateTime
@@ -242,6 +243,9 @@ model ScopeBaseline {
   // Requests evaluated against this exact baseline.
   clientRequests ClientRequest[] @relation("ClientRequestAnalyzedAgainstBaseline")
 
+  // Analysis runs evaluated against this exact baseline.
+  analysisRuns RequestAnalysisRun[]
+
   // Baseline versions start at 1 and increase whenever the scope is formally
   // revised. The database constraint prevents duplicate versions per project.
   version Int @default(1)
@@ -344,11 +348,78 @@ model ClientRequestItem {
   // message remains preserved on ClientRequest.originalText as immutable evidence.
   text String @db.Text
 
+  // Durable analysis history for this atomic request item.
+  analysisRuns RequestAnalysisRun[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([clientRequestId, position])
   @@index([clientRequestId])
+}
+
+// -----------------------------------------------------------------------------
+// Scope Copilot: Request Analysis Run
+//
+// A RequestAnalysisRun is one durable execution of the decision engine against
+// one atomic ClientRequestItem.
+//
+// The run permanently records:
+// - the exact approved scope baseline used
+// - the AI provider/model
+// - the prompt and analysis versions
+// - the lifecycle/result of that execution
+//
+// Analysis runs are historical records. A later run must never overwrite an
+// earlier run because prompts, models, and comparison logic can evolve.
+// -----------------------------------------------------------------------------
+
+model RequestAnalysisRun {
+  id String @id @default(cuid())
+
+  clientRequestItemId String
+  clientRequestItem   ClientRequestItem @relation(fields: [clientRequestItemId], references: [id], onDelete: Cascade)
+
+  // Exact approved scope version used by this analysis run.
+  //
+  // This is intentionally stored directly on the run rather than inferred
+  // through ClientRequest so the analysis remains independently auditable.
+  scopeBaselineId String
+  scopeBaseline   ScopeBaseline @relation(fields: [scopeBaselineId], references: [id], onDelete: Restrict)
+
+  // PENDING   = run created but execution has not started
+  // RUNNING   = analysis execution is in progress
+  // COMPLETED = analysis produced a result
+  // FAILED    = execution failed; the run remains as historical evidence
+  status String @default("PENDING")
+
+  // AI/provider provenance.
+  provider String
+  model    String
+
+  // Versioned identifiers for the exact analysis logic.
+  // These let us distinguish model changes from prompt/engine changes.
+  promptVersion   String
+  analysisVersion String
+
+  // Raw immutable analysis output.
+  //
+  // This is a snapshot/artifact, not the application's canonical relational
+  // representation of scope evidence or business decisions.
+  resultSnapshot Json?
+
+  // Failure information is retained on the failed run for diagnostics/audit.
+  errorMessage String? @db.Text
+
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientRequestItemId, createdAt])
+  @@index([scopeBaselineId])
+  @@index([status])
 }
 
 // -----------------------------------------------------------------------------
