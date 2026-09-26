@@ -5,6 +5,9 @@ import {
 import { notFound } from "next/navigation";
 
 import { getClientRequest } from "@/lib/requests";
+import {
+  getRequestAnalysisRuns,
+} from "@/lib/request-analysis";
 
 import { ProjectWorkspaceHeader } from "@/components/projects/project-workspace-header";
 import { ProjectWorkspaceNav } from "@/components/projects/project-workspace-nav";
@@ -49,17 +52,41 @@ export default async function RequestDetailPage({
   const status =
     request.status as RequestStatus;
 
+  const initialAnalyses = await Promise.all(
+    request.items.map(async (item) => {
+      const runs =
+        await getRequestAnalysisRuns(item.id);
+
+      const latestCompletedRun =
+        runs.find(
+          (run) =>
+            run.status === "COMPLETED" &&
+            run.resultSnapshot !== null,
+        );
+
+      return {
+        itemId: item.id,
+        run: latestCompletedRun
+          ? {
+              id: latestCompletedRun.id,
+              status:
+                latestCompletedRun.status,
+              scopeBaselineId:
+                latestCompletedRun.scopeBaselineId,
+              scopeBaselineVersion:
+                latestCompletedRun.scopeBaseline
+                  .version,
+              result:
+                latestCompletedRun.resultSnapshot,
+            }
+          : null,
+      };
+    }),
+  );
+
   return (
     <div className="min-h-full">
       <div className="mx-auto max-w-7xl px-5 py-5 sm:px-6 lg:px-8 lg:py-6">
-
-        {/* 
-         * Project-level context stays pinned while the request
-         * analysis workspace scrolls underneath it.
-         *
-         * Header + project navigation intentionally live in the
-         * same sticky container so they never separate while scrolling.
-         */}
         <div className="sticky top-0 z-40 -mx-5 bg-background/95 px-5 pb-1 backdrop-blur-md sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
           <ProjectWorkspaceHeader
             projectId={request.project.id}
@@ -75,7 +102,6 @@ export default async function RequestDetailPage({
         </div>
 
         <main className="mt-5">
-          {/* Request identity + compact scope context */}
           <div className="flex flex-col gap-3 border-b border-border/70 pb-4 lg:flex-row lg:items-end lg:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -90,11 +116,10 @@ export default async function RequestDetailPage({
 
               <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted-foreground">
                 Review the client request, break it into atomic asks,
-                and prepare it for scope analysis.
+                and evaluate each ask against the exact approved scope.
               </p>
             </div>
 
-            {/* Compact request metadata */}
             <section
               aria-label="Request context"
               className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs"
@@ -142,11 +167,6 @@ export default async function RequestDetailPage({
             </section>
           </div>
 
-          {/* 
-           * Immutable original client evidence.
-           * Collapsed by default so the analysis workspace gets
-           * the majority of the vertical space.
-           */}
           <details className="group mt-4 rounded-xl border bg-card shadow-sm">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3.5 sm:px-5 [&::-webkit-details-marker]:hidden">
               <div className="min-w-0">
@@ -188,12 +208,18 @@ export default async function RequestDetailPage({
             </div>
           </details>
 
-          {/* Main request-analysis workspace */}
           <div className="mt-4">
             <RequestItemsPanel
-              projectId={request.project.id}
+              projectId={projectId}
               requestId={request.id}
               items={request.items}
+              scopeBaselineVersion={
+                request.analyzedAgainstBaseline
+                  .version
+              }
+              initialAnalyses={
+                initialAnalyses
+              }
             />
           </div>
         </main>

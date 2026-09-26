@@ -1,4 +1,4 @@
- "use server";
+"use server";
 
 import { revalidatePath } from "next/cache";
 
@@ -9,6 +9,7 @@ import {
 } from "@/lib/requests";
 
 import { decomposeClientRequestText } from "@/lib/ai/request/decompose";
+import { analyzeRequestScope } from "@/lib/ai/request/analyze-scope";
 
 /**
  * Server-side transport for request capture.
@@ -84,8 +85,6 @@ export async function saveClientRequestItemsAction(data: {
     items: data.items,
   });
 
-  // Keep future server renders and the request list fresh.
-  // The current client workspace does not need router.refresh().
   revalidatePath(
     `/projects/${data.projectId}/requests/${data.requestId}`,
   );
@@ -101,4 +100,46 @@ export async function saveClientRequestItemsAction(data: {
       text: item.text,
     })),
   };
+}
+
+/**
+ * Run the complete B → C scope-analysis pipeline for one
+ * confirmed atomic client request item.
+ *
+ * The server owns the analysis lifecycle and persists the
+ * resulting snapshot in RequestAnalysisRun.
+ */
+export async function analyzeClientRequestItemAction(data: {
+  projectId: string;
+  requestId: string;
+  itemId: string;
+}) {
+  const request = await getClientRequest(
+    data.projectId,
+    data.requestId,
+  );
+
+  if (!request) {
+    throw new Error("Client request not found.");
+  }
+
+  const item = request.items.find(
+    (requestItem) =>
+      requestItem.id === data.itemId,
+  );
+
+  if (!item) {
+    throw new Error(
+      "Client request item not found.",
+    );
+  }
+
+  const result =
+    await analyzeRequestScope(item.id);
+
+  revalidatePath(
+    `/projects/${data.projectId}/requests/${data.requestId}`,
+  );
+
+  return result;
 }
