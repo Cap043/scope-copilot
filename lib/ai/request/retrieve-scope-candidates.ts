@@ -206,6 +206,7 @@ export async function retrieveScopeCandidateIds(
   input: {
     clientRequestText: string;
     approvedScope: unknown;
+    traceId?: string;
   },
 ): Promise<ScopeCandidateRetrievalResult> {
   const clientRequestText =
@@ -229,6 +230,9 @@ export async function retrieveScopeCandidateIds(
   const result =
     await geminiProvider.generateStructuredOutput<unknown>(
       {
+        operation: "scope-retrieval",
+        traceId: input.traceId,
+
         systemInstruction:
           SYSTEM_INSTRUCTION,
 
@@ -315,12 +319,6 @@ export function resolveScopeCandidateIds(
   const candidateIdSet =
     new Set(candidateIds);
 
-  /*
-   * Standard scope sections.
-   *
-   * These all share the same persisted item shape:
-   * title + optional description + evidence + lifecycle metadata.
-   */
   resolveStandardItems(
     "deliverables",
     approvedScope.deliverables,
@@ -349,10 +347,6 @@ export function resolveScopeCandidateIds(
     candidatesById,
   );
 
-  /*
-   * Revision limits have a different canonical shape:
-   * type + limit.
-   */
   for (const item of approvedScope.revisionLimits) {
     if (candidatesById.has(item.id)) {
       throw new Error(
@@ -376,10 +370,6 @@ export function resolveScopeCandidateIds(
     });
   }
 
-  /*
-   * Assumptions have another distinct canonical shape:
-   * statement.
-   */
   for (const item of approvedScope.assumptions) {
     if (candidatesById.has(item.id)) {
       throw new Error(
@@ -402,12 +392,6 @@ export function resolveScopeCandidateIds(
     });
   }
 
-  /*
-   * Every model-returned ID must resolve.
-   *
-   * This is the critical deterministic safety boundary between AI retrieval
-   * and canonical application data.
-   */
   const resolved: ScopeCandidateEvidence[] =
     [];
 

@@ -2,7 +2,7 @@ import { geminiProvider } from "@/lib/ai/gemini";
 import type { ScopeCandidateEvidence } from "@/lib/ai/request/retrieve-scope-candidates";
 
 export const SCOPE_COMPARISON_VERSION =
-  "scope-comparison-v1";
+  "scope-comparison-v2";
 
 export const SCOPE_RELATIONSHIPS = [
   "DIRECTLY_INCLUDED",
@@ -12,6 +12,7 @@ export const SCOPE_RELATIONSHIPS = [
   "CONFLICTING",
   "AMBIGUOUS",
   "UNRELATED",
+  "NO_SCOPE_EVIDENCE",
 ] as const;
 
 export type ScopeRelationship =
@@ -35,7 +36,7 @@ export type ScopeComparison = {
 export type ScopeComparisonResult = {
   overallRelationship: ScopeRelationship;
   comparisons: ScopeComparison[];
-  confidence: ScopeComparisonConfidence;
+  confidence?: ScopeComparisonConfidence;
 };
 
 const scopeComparisonSchema = {
@@ -51,6 +52,7 @@ const scopeComparisonSchema = {
         "CONFLICTING",
         "AMBIGUOUS",
         "UNRELATED",
+        "NO_SCOPE_EVIDENCE",
       ],
     },
 
@@ -73,6 +75,7 @@ const scopeComparisonSchema = {
               "CONFLICTING",
               "AMBIGUOUS",
               "UNRELATED",
+              "NO_SCOPE_EVIDENCE",
             ],
           },
 
@@ -80,6 +83,7 @@ const scopeComparisonSchema = {
             type: "string",
           },
         },
+
         required: [
           "scopeItemId",
           "relationship",
@@ -101,7 +105,6 @@ const scopeComparisonSchema = {
   required: [
     "overallRelationship",
     "comparisons",
-    "confidence",
   ],
 } as const;
 
@@ -134,14 +137,33 @@ DO NOT:
 Your job is to interpret the semantic relationship between the client request
 and each supplied candidate scope item.
 
+IMPORTANT DISTINCTION:
+
+Candidate retrieval intentionally favors recall.
+
+Therefore, a retrieved candidate may:
+- directly support the requested capability
+- support only part of the requested capability
+- be related contextual scope but not actually cover the requested capability
+- be an exclusion relevant to the request
+- conflict with the request
+- be ambiguous
+- be an unrelated retrieval false positive
+
+Do NOT treat shared nouns, pages, entities, product areas, or context as
+evidence that the requested functionality itself is included.
+
+The approved scope is the source of truth.
+
 RELATIONSHIPS:
 
 DIRECTLY_INCLUDED
 
-Use when the requested capability is already covered by the candidate scope
-item with substantially the same intended outcome.
+Use when the requested capability is explicitly covered by the candidate scope
+item with substantially the same intended functionality or outcome.
 
 Example:
+
 Client request:
 "Can users log in with Google?"
 
@@ -152,24 +174,69 @@ This can be DIRECTLY_INCLUDED.
 
 PARTIALLY_INCLUDED
 
-Use when the approved scope covers only part of what the client is asking for.
+Use ONLY when the client request contains multiple meaningful requested
+components and the approved scope explicitly supports at least one meaningful
+component of the requested functionality while other meaningful requested
+components are not supported by the supplied scope evidence.
+
+PARTIALLY_INCLUDED requires actual scope evidence for a requested capability.
+
+Do NOT use PARTIALLY_INCLUDED merely because:
+- the same page is mentioned
+- the same product area is mentioned
+- the candidate is contextually related
+- a broader concept exists in scope
+- the candidate could be a place where the requested feature might be implemented
 
 Example:
+
 Scope:
-"User authentication."
+"About page."
 
 Client request:
-"Add Google login, Apple login, and enterprise SSO."
+"Replace the About Us text and add a scroll-animated timeline."
 
-Authentication is covered, but the complete requested capability extends
-beyond the supplied scope item.
+The About page supports one requested component, while the timeline animation
+is not supported.
+
+This can be PARTIALLY_INCLUDED.
+
+Counterexample:
+
+Scope:
+"Responsive homepage."
+
+Client request:
+"Add an Instagram feed to the homepage."
+
+The homepage being in scope does NOT establish that an Instagram feed,
+social-media integration, external API integration, embedded feed, or similar
+functionality is included.
+
+This should generally be RELATED_NOT_INCLUDED unless another supplied scope
+candidate explicitly supports the Instagram/social-feed capability.
 
 RELATED_NOT_INCLUDED
 
-Use when the scope item is clearly related to the request but does not itself
-cover the requested capability.
+Use when a supplied scope item is clearly related to the request or provides
+context for it, but the candidate does not itself cover the requested
+capability.
 
 Example:
+
+Scope:
+"Responsive homepage."
+
+Client request:
+"Add an Instagram feed to the homepage."
+
+The homepage is relevant context, but the approved evidence does not establish
+that the Instagram feed functionality is included.
+
+This should be RELATED_NOT_INCLUDED.
+
+Another example:
+
 Scope:
 "User authentication."
 
@@ -181,10 +248,11 @@ is not covered by that scope item.
 
 EXPLICITLY_EXCLUDED
 
-Use when the candidate is an approved exclusion that explicitly excludes
-the requested capability.
+Use when the candidate is an approved exclusion that explicitly excludes the
+requested capability.
 
 Example:
+
 Scope exclusion:
 "Additional third-party integrations are excluded."
 
@@ -207,22 +275,49 @@ Do not invent an interpretation to eliminate ambiguity.
 
 UNRELATED
 
-Use when a retrieved candidate was a high-recall retrieval false positive
-and has no meaningful semantic relationship to the client request.
+Use when a retrieved candidate was a high-recall retrieval false positive and
+has no meaningful semantic relationship to the client request.
+
+NO_SCOPE_EVIDENCE
+
+This relationship is reserved for the application-level condition where no
+approved scope candidates were retrieved.
+
+When candidate retrieval returns zero candidates, the comparison engine does
+NOT perform an AI comparison.
+
+In that case the application returns:
+
+- overallRelationship: NO_SCOPE_EVIDENCE
+- comparisons: []
+- no confidence value
+
+NO_SCOPE_EVIDENCE means:
+
+"No matching approved-scope evidence was retrieved."
+
+It does NOT mean:
+
+"The request is definitely out of scope."
+
+Do not use NO_SCOPE_EVIDENCE for an individual supplied candidate.
 
 IMPORTANT:
 
-Candidate retrieval intentionally favors recall.
-
-Therefore, some supplied candidates may be unrelated. That is normal.
-
-Evaluate each candidate independently.
+For supplied candidates, evaluate each candidate independently.
 
 The overall relationship should represent the strongest meaningful relationship
 between the request and the supplied candidates.
 
 Do not treat a single weak or incidental relationship as stronger than clear
 approved scope evidence.
+
+For PARTIALLY_INCLUDED specifically:
+
+A shared page, entity, product area, or contextual relationship is NOT enough.
+
+The candidate must explicitly support at least one meaningful requested
+capability.
 
 The client request is the thing being interpreted.
 
@@ -258,7 +353,7 @@ function normalizeComparisonResult(
 
   if (
     typeof result.overallRelationship !==
-    "string" ||
+      "string" ||
     !SCOPE_RELATIONSHIPS.includes(
       result.overallRelationship as ScopeRelationship,
     )
@@ -271,6 +366,18 @@ function normalizeComparisonResult(
   if (!Array.isArray(result.comparisons)) {
     throw new Error(
       "Scope comparison did not return comparisons.",
+    );
+  }
+
+  const overallRelationship =
+    result.overallRelationship as ScopeRelationship;
+
+  if (
+    overallRelationship ===
+    "NO_SCOPE_EVIDENCE"
+  ) {
+    throw new Error(
+      "NO_SCOPE_EVIDENCE is only valid when no scope candidates were supplied.",
     );
   }
 
@@ -346,6 +453,15 @@ function normalizeComparisonResult(
     }
 
     if (
+      item.relationship ===
+      "NO_SCOPE_EVIDENCE"
+    ) {
+      throw new Error(
+        `Scope comparison returned NO_SCOPE_EVIDENCE for supplied scope item "${scopeItemId}".`,
+      );
+    }
+
+    if (
       typeof item.explanation !== "string" ||
       !item.explanation.trim()
     ) {
@@ -372,25 +488,18 @@ function normalizeComparisonResult(
   }
 
   return {
-    overallRelationship:
-      result.overallRelationship as ScopeRelationship,
+    overallRelationship,
     comparisons,
     confidence:
       result.confidence as ScopeComparisonConfidence,
   };
 }
 
-/**
- * Perform deep semantic comparison between one atomic client request
- * and the validated scope candidates returned by Step B.
- *
- * The candidates are canonical application data. The AI is only asked
- * to interpret their relationship to the client request.
- */
 export async function compareRequestToScope(
   input: {
     clientRequestText: string;
     candidates: ScopeCandidateEvidence[];
+    traceId?: string;
   },
 ): Promise<ScopeComparisonResult> {
   const clientRequestText =
@@ -418,24 +527,20 @@ export async function compareRequestToScope(
     );
   }
 
-  /*
-   * No candidates is a valid retrieval outcome.
-   *
-   * It is deliberately represented separately from business classification.
-   * The caller may later interpret the comparison result together with other
-   * analysis stages.
-   */
   if (input.candidates.length === 0) {
     return {
-      overallRelationship: "UNRELATED",
+      overallRelationship:
+        "NO_SCOPE_EVIDENCE",
       comparisons: [],
-      confidence: "LOW",
     };
   }
 
   const result =
     await geminiProvider.generateStructuredOutput<unknown>(
       {
+        operation: "scope-comparison",
+        traceId: input.traceId,
+
         systemInstruction:
           SYSTEM_INSTRUCTION,
 

@@ -74,7 +74,8 @@ export type RequestScopeAnalysisSnapshot = {
       | "EXPLICITLY_EXCLUDED"
       | "CONFLICTING"
       | "AMBIGUOUS"
-      | "UNRELATED";
+      | "UNRELATED"
+      | "NO_SCOPE_EVIDENCE";
 
     comparisons: Array<{
       scopeItemId: string;
@@ -85,11 +86,12 @@ export type RequestScopeAnalysisSnapshot = {
         | "EXPLICITLY_EXCLUDED"
         | "CONFLICTING"
         | "AMBIGUOUS"
-        | "UNRELATED";
+        | "UNRELATED"
+        | "NO_SCOPE_EVIDENCE";
       explanation: string;
     }>;
 
-    confidence:
+    confidence?:
       | "HIGH"
       | "MEDIUM"
       | "LOW";
@@ -105,18 +107,31 @@ export async function analyzeRequestScope(
   clientRequestItemId: string,
 ) {
   const model = getModel();
+  const analysisStartedAt =
+    performance.now();
 
-  const run = await createRequestAnalysisRun({
-    clientRequestItemId,
-    provider: PROVIDER,
-    model,
-    promptVersion: [
-      SCOPE_CANDIDATE_RETRIEVAL_VERSION,
-      SCOPE_COMPARISON_VERSION,
-    ].join("+"),
-    analysisVersion:
-      REQUEST_SCOPE_ANALYSIS_VERSION,
-  });
+  const traceId =
+    crypto.randomUUID();
+
+  console.info(
+    `[AI][ScopeAnalysis][START] ` +
+      `traceId=${traceId} ` +
+      `itemId=${clientRequestItemId} ` +
+      `model=${model}`,
+  );
+
+  const run =
+    await createRequestAnalysisRun({
+      clientRequestItemId,
+      provider: PROVIDER,
+      model,
+      promptVersion: [
+        SCOPE_CANDIDATE_RETRIEVAL_VERSION,
+        SCOPE_COMPARISON_VERSION,
+      ].join("+"),
+      analysisVersion:
+        REQUEST_SCOPE_ANALYSIS_VERSION,
+    });
 
   await startRequestAnalysisRun(run.id);
 
@@ -141,11 +156,33 @@ export async function analyzeRequestScope(
       );
     }
 
+    const retrievalStartedAt =
+      performance.now();
+
     const retrieval =
       await retrieveScopeCandidateIds({
         clientRequestText: item.text,
         approvedScope: parsedScope.data,
+        traceId,
       });
+
+    const retrievalDurationMs =
+      Math.round(
+        performance.now() -
+          retrievalStartedAt,
+      );
+
+    console.info(
+      `[AI][ScopeAnalysis][RETRIEVAL] ` +
+        `traceId=${traceId} ` +
+        `runId=${run.id} ` +
+        `itemId=${clientRequestItemId} ` +
+        `durationMs=${retrievalDurationMs} ` +
+        `candidateCount=${retrieval.scopeItemIds.length}`,
+    );
+
+    const resolutionStartedAt =
+      performance.now();
 
     const candidates =
       resolveScopeCandidateIds(
@@ -153,11 +190,47 @@ export async function analyzeRequestScope(
         retrieval.scopeItemIds,
       );
 
+    const resolutionDurationMs =
+      Math.round(
+        performance.now() -
+          resolutionStartedAt,
+      );
+
+    console.info(
+      `[AI][ScopeAnalysis][RESOLUTION] ` +
+        `traceId=${traceId} ` +
+        `runId=${run.id} ` +
+        `itemId=${clientRequestItemId} ` +
+        `durationMs=${resolutionDurationMs} ` +
+        `candidateCount=${candidates.length}`,
+    );
+
+    const comparisonStartedAt =
+      performance.now();
+
     const comparison =
       await compareRequestToScope({
         clientRequestText: item.text,
         candidates,
+        traceId,
       });
+
+    const comparisonDurationMs =
+      Math.round(
+        performance.now() -
+          comparisonStartedAt,
+      );
+
+    console.info(
+      `[AI][ScopeAnalysis][COMPARISON] ` +
+        `traceId=${traceId} ` +
+        `runId=${run.id} ` +
+        `itemId=${clientRequestItemId} ` +
+        `durationMs=${comparisonDurationMs} ` +
+        `candidateCount=${candidates.length} ` +
+        `relationship=${comparison.overallRelationship} ` +
+        `confidence=${comparison.confidence ?? "NONE"}`,
+    );
 
     const snapshot: RequestScopeAnalysisSnapshot =
       {
@@ -179,8 +252,12 @@ export async function analyzeRequestScope(
             comparison.overallRelationship,
           comparisons:
             comparison.comparisons,
-          confidence:
-            comparison.confidence,
+          ...(comparison.confidence
+            ? {
+                confidence:
+                  comparison.confidence,
+              }
+            : {}),
         },
 
         scopeBaseline: {
@@ -189,11 +266,39 @@ export async function analyzeRequestScope(
         },
       };
 
+    const persistenceStartedAt =
+      performance.now();
+
     const completedRun =
       await completeRequestAnalysisRun({
         runId: run.id,
         resultSnapshot: snapshot,
       });
+
+    const persistenceDurationMs =
+      Math.round(
+        performance.now() -
+          persistenceStartedAt,
+      );
+
+    const totalDurationMs =
+      Math.round(
+        performance.now() -
+          analysisStartedAt,
+      );
+
+    console.info(
+      `[AI][ScopeAnalysis][END] ` +
+        `traceId=${traceId} ` +
+        `runId=${run.id} ` +
+        `itemId=${clientRequestItemId} ` +
+        `totalMs=${totalDurationMs} ` +
+        `retrievalMs=${retrievalDurationMs} ` +
+        `resolutionMs=${resolutionDurationMs} ` +
+        `comparisonMs=${comparisonDurationMs} ` +
+        `persistenceMs=${persistenceDurationMs} ` +
+        `status=SUCCESS`,
+    );
 
     return {
       id: completedRun.id,
@@ -205,10 +310,26 @@ export async function analyzeRequestScope(
       result: snapshot,
     };
   } catch (error) {
+    const totalDurationMs =
+      Math.round(
+        performance.now() -
+          analysisStartedAt,
+      );
+
     const message =
       error instanceof Error
         ? error.message
         : "Scope analysis failed.";
+
+    console.error(
+      `[AI][ScopeAnalysis][ERROR] ` +
+        `traceId=${traceId} ` +
+        `runId=${run.id} ` +
+        `itemId=${clientRequestItemId} ` +
+        `totalMs=${totalDurationMs} ` +
+        `status=ERROR ` +
+        `error=${JSON.stringify(message)}`,
+    );
 
     await failRequestAnalysisRun({
       runId: run.id,

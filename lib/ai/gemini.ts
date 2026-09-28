@@ -30,6 +30,11 @@ function createGeminiClient(): GeminiClient {
 
   return new GoogleGenAI({
     apiKey,
+    httpOptions: {
+      retryOptions: {
+        attempts: 1,
+      },
+    },
   });
 }
 
@@ -42,30 +47,39 @@ export function createGeminiProvider(
       userContent,
       schema,
     }: GenerateStructuredOutputParams): Promise<T> {
-      const geminiClient = client ?? createGeminiClient();
+      const geminiClient =
+        client ?? createGeminiClient();
 
-      const response = await geminiClient.models.generateContent({
-        model: process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest",
-        // model: "gemini-flash-latest",
-        contents: userContent,
-        config: {
-          systemInstruction,
-          responseMimeType: "application/json",
-          responseSchema: schema,
-        },
-      });
+      const response =
+        await geminiClient.models.generateContent({
+          model:
+            process.env.GEMINI_MODEL ??
+            "gemini-flash-lite-latest",
+          // model: "gemini-flash-latest",
+          contents: userContent,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema: schema,
+          },
+        });
 
       if (!response.text) {
-        throw new Error("Gemini returned an empty response.");
+        throw new Error(
+          "Gemini returned an empty response.",
+        );
       }
 
       try {
         return JSON.parse(response.text) as T;
       } catch {
-        throw new Error("Gemini returned invalid JSON.");
+        throw new Error(
+          "Gemini returned invalid JSON.",
+        );
       }
     },
   };
 }
 
-export const geminiProvider = createGeminiProvider();
+export const geminiProvider =
+  createGeminiProvider();

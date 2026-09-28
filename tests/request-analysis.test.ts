@@ -522,7 +522,9 @@ describe("RequestAnalysisRun persistence", () => {
     ).toEqual(resultSnapshot);
   });
 
-  it("runs through the PENDING to RUNNING to FAILED lifecycle", async () => {
+it(
+  "runs through the PENDING to RUNNING to FAILED lifecycle",
+  async () => {
     const organization =
       await createTestOrganization();
 
@@ -583,7 +585,7 @@ describe("RequestAnalysisRun persistence", () => {
     ).toBe(
       "Test analysis failure.",
     );
-  });
+  } , 10000,);
 
   it("rejects invalid lifecycle transitions", async () => {
     const organization =

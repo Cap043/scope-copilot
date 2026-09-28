@@ -177,6 +177,7 @@ describe(
           {
             overallRelationship:
               "DIRECTLY_INCLUDED",
+
             comparisons: [
               {
                 scopeItemId:
@@ -187,6 +188,7 @@ describe(
                   "The requested authentication capability is covered.",
               },
             ],
+
             confidence: "HIGH",
           },
         );
@@ -230,7 +232,7 @@ describe(
     );
 
     it(
-      "returns a non-classifying empty result when there are no candidates",
+      "returns NO_SCOPE_EVIDENCE without calling the AI when there are no candidates",
       async () => {
         const result =
           await compareRequestToScope({
@@ -241,10 +243,13 @@ describe(
 
         expect(result).toEqual({
           overallRelationship:
-            "UNRELATED",
+            "NO_SCOPE_EVIDENCE",
           comparisons: [],
-          confidence: "LOW",
         });
+
+        expect(
+          result.confidence,
+        ).toBeUndefined();
 
         expect(
           generateStructuredOutput,
@@ -439,6 +444,71 @@ describe(
     );
 
     it(
+      "rejects NO_SCOPE_EVIDENCE when candidates were supplied",
+      async () => {
+        generateStructuredOutput.mockResolvedValueOnce(
+          {
+            overallRelationship:
+              "NO_SCOPE_EVIDENCE",
+
+            comparisons: [],
+
+            confidence: "LOW",
+          },
+        );
+
+        await expect(
+          compareRequestToScope({
+            clientRequestText:
+              "Add Google login.",
+            candidates: [
+              candidates[0],
+            ],
+          }),
+        ).rejects.toThrow(
+          "NO_SCOPE_EVIDENCE is only valid when no scope candidates were supplied.",
+        );
+      },
+    );
+
+    it(
+      "rejects NO_SCOPE_EVIDENCE for an individual candidate",
+      async () => {
+        generateStructuredOutput.mockResolvedValueOnce(
+          {
+            overallRelationship:
+              "RELATED_NOT_INCLUDED",
+
+            comparisons: [
+              {
+                scopeItemId:
+                  "feature-oauth",
+                relationship:
+                  "NO_SCOPE_EVIDENCE",
+                explanation:
+                  "No evidence.",
+              },
+            ],
+
+            confidence: "LOW",
+          },
+        );
+
+        await expect(
+          compareRequestToScope({
+            clientRequestText:
+              "Add Google login.",
+            candidates: [
+              candidates[0],
+            ],
+          }),
+        ).rejects.toThrow(
+          'Scope comparison returned NO_SCOPE_EVIDENCE for supplied scope item "feature-oauth".',
+        );
+      },
+    );
+
+    it(
       "rejects an empty explanation",
       async () => {
         generateStructuredOutput.mockResolvedValueOnce(
@@ -562,6 +632,128 @@ describe(
           "exclusion-third-party",
           "feature-oauth",
         ]);
+      },
+    );
+
+    it(
+      "documents the stricter partial-inclusion rule in the comparison prompt",
+      async () => {
+        generateStructuredOutput.mockResolvedValueOnce(
+          {
+            overallRelationship:
+              "RELATED_NOT_INCLUDED",
+
+            comparisons: [
+              {
+                scopeItemId:
+                  "feature-oauth",
+                relationship:
+                  "RELATED_NOT_INCLUDED",
+                explanation:
+                  "Authentication is related context but does not explicitly support the requested Instagram feed functionality.",
+              },
+            ],
+
+            confidence: "HIGH",
+          },
+        );
+
+        await compareRequestToScope({
+          clientRequestText:
+            "Add an Instagram feed to the homepage.",
+          candidates: [
+            {
+              ...candidates[0],
+              title: "Homepage",
+              description:
+                "The responsive homepage is included in the approved scope.",
+            },
+          ],
+        });
+
+        const call =
+          generateStructuredOutput.mock
+            .calls[
+              generateStructuredOutput.mock.calls.length - 1
+            ][0];
+
+        expect(
+          call.systemInstruction,
+        ).toContain(
+          "A shared page, entity, product area, or contextual relationship is NOT enough.",
+        );
+
+        expect(
+          call.systemInstruction,
+        ).toContain(
+          "The candidate must explicitly support at least one meaningful requested capability.",
+        );
+
+        expect(
+          call.systemInstruction,
+        ).toContain(
+          "This should be RELATED_NOT_INCLUDED.",
+        );
+      },
+    );
+
+    it(
+      "accepts RELATED_NOT_INCLUDED for homepage context without treating it as partial inclusion",
+      async () => {
+        generateStructuredOutput.mockResolvedValueOnce(
+          {
+            overallRelationship:
+              "RELATED_NOT_INCLUDED",
+
+            comparisons: [
+              {
+                scopeItemId:
+                  "homepage",
+                relationship:
+                  "RELATED_NOT_INCLUDED",
+                explanation:
+                  "The homepage is in scope, but the approved evidence does not specify an Instagram feed or social-media integration.",
+              },
+            ],
+
+            confidence: "HIGH",
+          },
+        );
+
+        const homepageCandidate = {
+          ...candidates[0],
+          id: "homepage",
+          title: "Homepage",
+          description:
+            "Responsive homepage included in the approved scope.",
+        };
+
+        const result =
+          await compareRequestToScope({
+            clientRequestText:
+              "Add an Instagram feed to the homepage.",
+            candidates: [
+              homepageCandidate,
+            ],
+          });
+
+        expect(result).toEqual({
+          overallRelationship:
+            "RELATED_NOT_INCLUDED",
+
+          comparisons: [
+            {
+              scopeItemId:
+                "homepage",
+              relationship:
+                "RELATED_NOT_INCLUDED",
+              explanation:
+                "The homepage is in scope, but the approved evidence does not specify an Instagram feed or social-media integration.",
+            },
+          ],
+
+          confidence: "HIGH",
+        });
       },
     );
   },

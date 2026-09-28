@@ -4,26 +4,20 @@ import { revalidatePath } from "next/cache";
 
 import {
   createClientRequest,
-  saveClientRequestItems,
   getClientRequest,
+  saveClientRequestItems,
 } from "@/lib/requests";
-
 import { decomposeClientRequestText } from "@/lib/ai/request/decompose";
 import { analyzeRequestScope } from "@/lib/ai/request/analyze-scope";
+import { getRequestAnalysisRuns } from "@/lib/request-analysis";
 
-/**
- * Server-side transport for request capture.
- */
 export async function createClientRequestAction(data: {
   projectId: string;
   originalText: string;
 }) {
   const request = await createClientRequest(data);
 
-  revalidatePath(
-    `/projects/${data.projectId}/requests`,
-  );
-
+  revalidatePath(`/projects/${data.projectId}/requests`);
   revalidatePath(
     `/projects/${data.projectId}/requests/${request.id}`,
   );
@@ -38,12 +32,6 @@ export async function createClientRequestAction(data: {
   };
 }
 
-/**
- * Ask Gemini to break the immutable original client message into
- * independently analyzable asks.
- *
- * Nothing is persisted by this action.
- */
 export async function decomposeClientRequestAction(data: {
   projectId: string;
   requestId: string;
@@ -68,13 +56,6 @@ export async function decomposeClientRequestAction(data: {
   );
 }
 
-/**
- * Persist the human-reviewed atomic request items.
- *
- * The saved items are returned directly to the client so the
- * current analysis workspace can transition without refreshing
- * the entire Server Component tree.
- */
 export async function saveClientRequestItemsAction(data: {
   projectId: string;
   requestId: string;
@@ -102,13 +83,6 @@ export async function saveClientRequestItemsAction(data: {
   };
 }
 
-/**
- * Run the complete B → C scope-analysis pipeline for one
- * confirmed atomic client request item.
- *
- * The server owns the analysis lifecycle and persists the
- * resulting snapshot in RequestAnalysisRun.
- */
 export async function analyzeClientRequestItemAction(data: {
   projectId: string;
   requestId: string;
@@ -142,4 +116,167 @@ export async function analyzeClientRequestItemAction(data: {
   );
 
   return result;
+}
+
+export type BatchRequestAnalysisResult =
+  | {
+      itemId: string;
+      status: "COMPLETED";
+      runId: string;
+      result: unknown;
+    }
+  | {
+      itemId: string;
+      status: "FAILED";
+      error: string;
+    }
+  | {
+      itemId: string;
+      status: "SKIPPED_RUNNING";
+    }
+  | {
+      itemId: string;
+      status: "SKIPPED_COMPLETED";
+      runId: string;
+      result: unknown;
+    };
+
+/**
+ * Analyze multiple confirmed atomic asks concurrently.
+ *
+ * The request itself is authorized first, every supplied item ID is checked
+ * against that request, and already-running/completed items are not started
+ * again. Failed items remain retryable. Promise.allSettled isolates failures
+ * so one AI failure never cancels the other analyses.
+ */
+export async function analyzeClientRequestItemsAction(data: {
+  projectId: string;
+  requestId: string;
+  itemIds: string[];
+}) {
+  const request = await getClientRequest(
+    data.projectId,
+    data.requestId,
+  );
+
+  if (!request) {
+    throw new Error("Client request not found.");
+  }
+
+  const uniqueItemIds = [
+    ...new Set(data.itemIds.map((itemId) => itemId.trim())),
+  ].filter(Boolean);
+
+  if (uniqueItemIds.length === 0) {
+    throw new Error(
+      "At least one client request item is required.",
+    );
+  }
+
+  const requestItems = uniqueItemIds.map((itemId) => {
+    const item = request.items.find(
+      (requestItem) => requestItem.id === itemId,
+    );
+
+    if (!item) {
+      throw new Error(
+        `Client request item ${itemId} does not belong to this request.`,
+      );
+    }
+
+    return item;
+  });
+
+  const prepared = await Promise.all(
+    requestItems.map(async (item) => {
+      const runs = await getRequestAnalysisRuns(item.id);
+      const latestRun = runs[0];
+
+      if (latestRun?.status === "RUNNING" || latestRun?.status === "PENDING") {
+        return {
+          itemId: item.id,
+          action: "SKIPPED_RUNNING" as const,
+        };
+      }
+
+      if (
+        latestRun?.status === "COMPLETED" &&
+        latestRun.resultSnapshot !== null
+      ) {
+        return {
+          itemId: item.id,
+          action: "SKIPPED_COMPLETED" as const,
+          runId: latestRun.id,
+          result: latestRun.resultSnapshot,
+        };
+      }
+
+      return {
+        itemId: item.id,
+        action: "ANALYZE" as const,
+      };
+    }),
+  );
+
+  const analyses = prepared.filter(
+    (entry) => entry.action === "ANALYZE",
+  );
+
+  const settled = await Promise.allSettled(
+    analyses.map((entry) =>
+      analyzeRequestScope(entry.itemId),
+    ),
+  );
+
+  const results: BatchRequestAnalysisResult[] = [];
+
+  for (const entry of prepared) {
+    if (entry.action === "SKIPPED_RUNNING") {
+      results.push({
+        itemId: entry.itemId,
+        status: "SKIPPED_RUNNING",
+      });
+      continue;
+    }
+
+    if (entry.action === "SKIPPED_COMPLETED") {
+      results.push({
+        itemId: entry.itemId,
+        status: "SKIPPED_COMPLETED",
+        runId: entry.runId,
+        result: entry.result,
+      });
+    }
+  }
+
+  analyses.forEach((entry, index) => {
+    const settledResult = settled[index];
+
+    if (settledResult.status === "fulfilled") {
+      results.push({
+        itemId: entry.itemId,
+        status: "COMPLETED",
+        runId: settledResult.value.id,
+        result: settledResult.value.result,
+      });
+      return;
+    }
+
+    results.push({
+      itemId: entry.itemId,
+      status: "FAILED",
+      error:
+        settledResult.reason instanceof Error
+          ? settledResult.reason.message
+          : "Scope analysis failed.",
+    });
+  });
+
+  revalidatePath(
+    `/projects/${data.projectId}/requests/${data.requestId}`,
+  );
+
+  return {
+    results,
+  };
 }

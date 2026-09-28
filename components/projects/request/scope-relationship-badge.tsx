@@ -4,13 +4,29 @@ const RELATIONSHIP_LABELS: Record<
   ScopeRelationship,
   string
 > = {
-  DIRECTLY_INCLUDED: "Directly included",
-  PARTIALLY_INCLUDED: "Partially included",
-  RELATED_NOT_INCLUDED: "Related, not included",
-  EXPLICITLY_EXCLUDED: "Explicitly excluded",
-  CONFLICTING: "Conflicting",
-  AMBIGUOUS: "Ambiguous",
-  UNRELATED: "Unrelated",
+  DIRECTLY_INCLUDED:
+    "Directly included",
+
+  PARTIALLY_INCLUDED:
+    "Partially included",
+
+  RELATED_NOT_INCLUDED:
+    "Related, not included",
+
+  EXPLICITLY_EXCLUDED:
+    "Explicitly excluded",
+
+  CONFLICTING:
+    "Conflicting",
+
+  AMBIGUOUS:
+    "Ambiguous",
+
+  UNRELATED:
+    "Unrelated",
+
+  NO_SCOPE_EVIDENCE:
+    "Not found in approved scope",
 };
 
 const RELATIONSHIP_CLASSES: Record<
@@ -18,18 +34,27 @@ const RELATIONSHIP_CLASSES: Record<
   string
 > = {
   DIRECTLY_INCLUDED:
-    "bg-success text-success-foreground",
+    "bg-success/10 text-success",
+
   PARTIALLY_INCLUDED:
-    "bg-warning text-warning-foreground",
+    "bg-warning/10 text-warning",
+
   RELATED_NOT_INCLUDED:
     "bg-muted text-muted-foreground",
+
   EXPLICITLY_EXCLUDED:
-    "bg-destructive text-destructive-foreground",
+    "bg-destructive/10 text-destructive",
+
   CONFLICTING:
-    "bg-destructive text-destructive-foreground",
+    "bg-destructive/10 text-destructive",
+
   AMBIGUOUS:
-    "bg-orange-500 text-white",
+    "bg-warning/10 text-warning",
+
   UNRELATED:
+    "bg-muted text-muted-foreground",
+
+  NO_SCOPE_EVIDENCE:
     "bg-muted text-muted-foreground",
 };
 
@@ -43,14 +68,18 @@ export function ScopeRelationshipBadge({
   return (
     <span
       className={[
-        "inline-flex items-center rounded-full font-medium",
+        "inline-flex max-w-full items-center rounded-full font-medium leading-4",
         compact
           ? "px-2 py-0.5 text-[10px]"
           : "px-2.5 py-1 text-xs",
-        RELATIONSHIP_CLASSES[relationship],
+        RELATIONSHIP_CLASSES[
+          relationship
+        ],
       ].join(" ")}
     >
-      {RELATIONSHIP_LABELS[relationship]}
+      {RELATIONSHIP_LABELS[
+        relationship
+      ]}
     </span>
   );
 }
