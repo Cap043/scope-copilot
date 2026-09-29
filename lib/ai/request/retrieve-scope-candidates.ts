@@ -1,4 +1,4 @@
-import { geminiProvider } from "@/lib/ai/gemini";
+import { aiProvider } from "@/lib/ai";
 import {
   parseStoredScope,
   type NormalizedScope,
@@ -228,7 +228,7 @@ export async function retrieveScopeCandidateIds(
   }
 
   const result =
-    await geminiProvider.generateStructuredOutput<unknown>(
+    await aiProvider.generateStructuredOutput<unknown>(
       {
         operation: "scope-retrieval",
         traceId: input.traceId,

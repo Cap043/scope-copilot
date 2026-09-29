@@ -1,4 +1,4 @@
-import { geminiProvider } from "@/lib/ai/gemini";
+import { aiProvider } from "@/lib/ai";
 
 export type AtomicRequestBreakdown = {
   items: string[];
@@ -69,11 +69,11 @@ function normalizeItems(value: unknown): string[] {
     );
   }
 
-  if (items.length < 1 || items.length > 20) {
-    throw new Error(
-      "Atomic request breakdown must contain between 1 and 20 items.",
-    );
-  }
+  // if (items.length < 1 || items.length > 20) {
+  //   throw new Error(
+  //     "Atomic request breakdown must contain between 1 and 20 items.",
+  //   );
+  // }
 
   const normalized = items.map((item) => {
     if (typeof item !== "string") {
@@ -120,7 +120,7 @@ export async function decomposeClientRequestText(
   }
 
   const result =
-    await geminiProvider.generateStructuredOutput<unknown>({
+    await aiProvider.generateStructuredOutput<unknown>({
       systemInstruction: SYSTEM_INSTRUCTION,
       userContent: `Break down this client request into atomic asks:\n\n${originalText}`,
       schema: atomicRequestGeminiSchema,

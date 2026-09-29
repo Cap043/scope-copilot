@@ -1,6 +1,6 @@
 import {
   groqProvider,
-} from "./grok";
+} from "./groq";
 
 import {
   geminiProvider,

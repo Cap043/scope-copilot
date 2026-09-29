@@ -18,7 +18,7 @@ type GroqClient = {
           type: "json_schema";
           json_schema: {
             name: string;
-            strict: false;
+            strict: true;
             schema: unknown;
           };
         };
@@ -80,7 +80,7 @@ export function createGroqProvider(
             type: "json_schema",
             json_schema: {
               name: "scope_copilot_output",
-              strict: false,
+              strict: true,
               schema,
             },
           },

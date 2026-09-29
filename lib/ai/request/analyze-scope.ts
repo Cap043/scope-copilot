@@ -1,4 +1,8 @@
-import { geminiProvider } from "@/lib/ai/gemini";
+import {
+  aiProvider,
+  getAIModel,
+  getAIProviderName,
+} from "@/lib/ai";
 import {
   compareRequestToScope,
   SCOPE_COMPARISON_VERSION,
@@ -23,14 +27,7 @@ import {
 export const REQUEST_SCOPE_ANALYSIS_VERSION =
   "request-scope-analysis-v1";
 
-const PROVIDER = "gemini";
 
-function getModel() {
-  return (
-    process.env.GEMINI_MODEL ??
-    "gemini-flash-lite-latest"
-  );
-}
 
 export type RequestScopeAnalysisSnapshot = {
   type: "SCOPE_COMPARISON";
@@ -106,7 +103,8 @@ export type RequestScopeAnalysisSnapshot = {
 export async function analyzeRequestScope(
   clientRequestItemId: string,
 ) {
-  const model = getModel();
+  const model = getAIModel();
+const provider = getAIProviderName();
   const analysisStartedAt =
     performance.now();
 
@@ -123,7 +121,7 @@ export async function analyzeRequestScope(
   const run =
     await createRequestAnalysisRun({
       clientRequestItemId,
-      provider: PROVIDER,
+      provider,
       model,
       promptVersion: [
         SCOPE_CANDIDATE_RETRIEVAL_VERSION,

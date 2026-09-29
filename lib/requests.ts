@@ -347,15 +347,15 @@ export async function saveClientRequestItems(data: {
     );
   }
 
-  if (
-    !Array.isArray(data.items) ||
-    data.items.length < 1 ||
-    data.items.length > 20
-  ) {
-    throw new Error(
-      "A request must contain between 1 and 20 atomic items.",
-    );
-  }
+  // if (
+  //   !Array.isArray(data.items) ||
+  //   data.items.length < 1 ||
+  //   data.items.length > 20
+  // ) {
+  //   throw new Error(
+  //     "A request must contain between 1 and 20 atomic items.",
+  //   );
+  // }
 
   const normalizedItems = data.items.map(
     (item) => {

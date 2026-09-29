@@ -1,4 +1,4 @@
-import { geminiProvider } from "@/lib/ai/gemini";
+import { aiProvider } from "@/lib/ai";
 import type { ScopeCandidateEvidence } from "@/lib/ai/request/retrieve-scope-candidates";
 
 export const SCOPE_COMPARISON_VERSION =
@@ -316,8 +316,7 @@ For PARTIALLY_INCLUDED specifically:
 
 A shared page, entity, product area, or contextual relationship is NOT enough.
 
-The candidate must explicitly support at least one meaningful requested
-capability.
+The candidate must explicitly support at least one meaningful requested capability.
 
 The client request is the thing being interpreted.
 
@@ -536,7 +535,7 @@ export async function compareRequestToScope(
   }
 
   const result =
-    await geminiProvider.generateStructuredOutput<unknown>(
+    await aiProvider.generateStructuredOutput<unknown>(
       {
         operation: "scope-comparison",
         traceId: input.traceId,

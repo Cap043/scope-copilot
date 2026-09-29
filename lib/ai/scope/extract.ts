@@ -1,5 +1,9 @@
-import { geminiProvider } from "@/lib/ai/gemini";
+import { aiProvider } from "@/lib/ai";
 import { normalizedScopeGeminiSchema } from "@/lib/ai/gemini-schema";
+import { normalizedScopeGroqSchema } from "@/lib/ai/groq-schema";
+import {
+  getAIProviderName,
+} from "@/lib/ai";
 import { resolveSourceQuote } from "@/lib/scope-evidence";
 import {
   extractedScopeSchema,
@@ -486,7 +490,11 @@ export async function extractScope(
   }
 
   // Send the raw SOW to Gemini and request our normalized scope structure.
-  const result = await geminiProvider.generateStructuredOutput<unknown>({
+  const extractionSchema =
+  getAIProviderName() === "groq"
+    ? normalizedScopeGroqSchema
+    : normalizedScopeGeminiSchema;
+  const result = await aiProvider.generateStructuredOutput<unknown>({
     systemInstruction: SYSTEM_INSTRUCTION,
     userContent: `
 Extract the project scope from the following SOW.
@@ -495,7 +503,7 @@ Extract the project scope from the following SOW.
 ${trimmedText}
 --- SOW END ---
 `,
-    schema: normalizedScopeGeminiSchema,
+    schema: extractionSchema,
   });
 
    // Treat Gemini output as untrusted until it passes our application schema.
